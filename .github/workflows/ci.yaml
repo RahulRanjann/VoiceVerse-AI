@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node-quality:
+    name: Node quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate database client
+        run: pnpm db:generate
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run TypeScript quality gates
+        run: pnpm turbo run lint typecheck test build --filter='!@voiceverse/ai-service'
+
+  python-quality:
+    name: Python quality gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: '3.12'
+          working-directory: services/ai
+
+      - name: Synchronize locked environment
+        run: uv sync --project services/ai --locked --all-groups
+
+      - name: Lint
+        run: uv run --project services/ai --frozen ruff check services/ai
+
+      - name: Type check
+        run: uv run --project services/ai --frozen mypy services/ai/src services/ai/tests
+
+      - name: Test with coverage
+        run: uv run --project services/ai --frozen pytest services/ai --cov=voiceverse_ai --cov-report=term-missing
+
+      - name: Compile
+        run: uv run --project services/ai --frozen python -m compileall -q services/ai/src
+
+  infrastructure-quality:
+    name: Infrastructure configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose configuration
+        run: docker compose --env-file .env.example -f infrastructure/docker/compose.yaml config --quiet

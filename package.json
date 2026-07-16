@@ -1,0 +1,36 @@
+{
+  "name": "voiceverse-ai",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Production-grade multilingual AI dubbing platform",
+  "packageManager": "pnpm@10.24.0",
+  "engines": {
+    "node": ">=22.16.0 <25",
+    "pnpm": ">=10.24.0 <11"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "dev": "turbo run dev --parallel",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "typecheck": "turbo run typecheck",
+    "verify": "turbo run lint typecheck test build",
+    "db:generate": "pnpm --filter @voiceverse/database generate",
+    "db:migrate:dev": "pnpm --filter @voiceverse/database migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @voiceverse/database migrate:deploy",
+    "db:studio": "pnpm --filter @voiceverse/database studio",
+    "infra:up": "docker compose --env-file .env -f infrastructure/docker/compose.yaml up -d",
+    "infra:down": "docker compose --env-file .env -f infrastructure/docker/compose.yaml down",
+    "infra:status": "docker compose --env-file .env -f infrastructure/docker/compose.yaml ps",
+    "observability:up": "docker compose --env-file .env -f infrastructure/docker/compose.yaml --profile observability up -d",
+    "stack:up": "docker compose --env-file .env -f infrastructure/docker/compose.yaml --profile application --profile observability up -d --build"
+  },
+  "devDependencies": {
+    "prettier": "3.9.5",
+    "turbo": "2.10.5"
+  }
+}

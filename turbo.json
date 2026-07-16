@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^build", "@voiceverse/database#build"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^build", "@voiceverse/database#build"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build", "@voiceverse/database#build"],
+      "outputs": []
+    },
+    "test:coverage": {
+      "dependsOn": ["^build", "@voiceverse/database#build"],
+      "outputs": ["coverage/**", "htmlcov/**", ".coverage"]
+    },
+    "clean": {
+      "cache": false
+    },
+    "generate": {
+      "cache": false,
+      "outputs": ["src/generated/**"]
+    }
+  }
+}

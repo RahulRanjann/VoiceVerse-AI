@@ -1,0 +1,13 @@
+{
+  "name": "@voiceverse/ai-service",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "uv build --out-dir dist",
+    "dev": "uv run uvicorn voiceverse_ai.main:app --host 0.0.0.0 --port 8000 --reload",
+    "lint": "uv run ruff check .",
+    "test": "uv run pytest",
+    "test:coverage": "uv run pytest --cov=voiceverse_ai --cov-report=term-missing --cov-report=html",
+    "typecheck": "uv run mypy src tests"
+  }
+}

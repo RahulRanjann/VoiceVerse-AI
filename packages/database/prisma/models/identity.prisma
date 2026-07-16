@@ -1,0 +1,75 @@
+enum UserStatus {
+  ACTIVE    @map("active")
+  SUSPENDED @map("suspended")
+  DELETED   @map("deleted")
+
+  @@map("user_status")
+}
+
+enum OrganizationStatus {
+  ACTIVE    @map("active")
+  SUSPENDED @map("suspended")
+  CLOSED    @map("closed")
+
+  @@map("organization_status")
+}
+
+enum OrganizationRole {
+  OWNER  @map("owner")
+  ADMIN  @map("admin")
+  EDITOR @map("editor")
+  VIEWER @map("viewer")
+
+  @@map("organization_role")
+}
+
+model User {
+  id          String     @id @db.Uuid
+  email       String     @unique(map: "users_email_key") @db.VarChar(320)
+  displayName String?    @map("display_name") @db.VarChar(160)
+  avatarUrl   String?    @map("avatar_url") @db.Text
+  status      UserStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  memberships OrganizationMembership[]
+  auditLogs   AuditLog[]                @relation("AuditActor")
+
+  @@index([status], map: "users_status_idx")
+  @@map("users")
+}
+
+model Organization {
+  id          String             @id @db.Uuid
+  slug        String             @unique(map: "organizations_slug_key") @db.VarChar(63)
+  displayName String             @map("display_name") @db.VarChar(160)
+  status      OrganizationStatus @default(ACTIVE)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt   DateTime?          @map("deleted_at") @db.Timestamptz(6)
+
+  memberships OrganizationMembership[]
+  auditLogs   AuditLog[]
+  outboxEvents OutboxEvent[]
+
+  @@index([status], map: "organizations_status_idx")
+  @@map("organizations")
+}
+
+model OrganizationMembership {
+  id             String           @id @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  role           OrganizationRole
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, userId], map: "organization_memberships_org_user_key")
+  @@index([userId], map: "organization_memberships_user_id_idx")
+  @@index([organizationId, role], map: "organization_memberships_org_role_idx")
+  @@map("organization_memberships")
+}

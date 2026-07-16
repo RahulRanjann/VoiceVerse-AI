@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+  - job_name: voiceverse-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['api:3001']
+
+  - job_name: voiceverse-ai
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['ai:8000']
