@@ -9,10 +9,27 @@ describe('validateEnvironment', () => {
     expect(environment).toMatchObject({
       API_PORT: 3001,
       AUTH_ACCESS_TOKEN_TTL_SECONDS: 900,
+      DATABASE_CONNECTION_TIMEOUT_MS: 5_000,
+      DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: 30_000,
+      DATABASE_IDLE_TIMEOUT_MS: 30_000,
+      DATABASE_POOL_MAX: 10,
+      DATABASE_STATEMENT_TIMEOUT_MS: 30_000,
       NODE_ENV: 'development',
       OTEL_TRACES_EXPORTER: 'none',
       S3_PART_SIZE_BYTES: 67_108_864,
     });
+  });
+
+  it('rejects unsafe database pool and timeout limits', () => {
+    expect(() => validateEnvironment({ NODE_ENV: 'development', DATABASE_POOL_MAX: '0' })).toThrow(
+      /DATABASE_POOL_MAX/,
+    );
+    expect(() =>
+      validateEnvironment({
+        NODE_ENV: 'development',
+        DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: '0',
+      }),
+    ).toThrow(/DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS/);
   });
 
   it('requires infrastructure configuration in production', () => {

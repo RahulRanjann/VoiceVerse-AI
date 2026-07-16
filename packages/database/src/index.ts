@@ -6,8 +6,12 @@ export type { Prisma } from './generated/prisma/client';
 export * from './generated/prisma/enums';
 
 export interface DatabaseClientOptions {
+  connectionTimeoutMs?: number;
   connectionString: string;
+  idleInTransactionTimeoutMs?: number;
+  idleTimeoutMs?: number;
   maxConnections?: number;
+  statementTimeoutMs?: number;
 }
 
 /**
@@ -21,8 +25,12 @@ export function createDatabaseClient(options: DatabaseClientOptions): PrismaClie
   }
 
   const adapter = new PrismaPg({
+    connectionTimeoutMillis: options.connectionTimeoutMs ?? 5_000,
     connectionString: options.connectionString,
+    idle_in_transaction_session_timeout: options.idleInTransactionTimeoutMs ?? 30_000,
+    idleTimeoutMillis: options.idleTimeoutMs ?? 30_000,
     max: options.maxConnections ?? 10,
+    statement_timeout: options.statementTimeoutMs ?? 30_000,
     // Prisma's driver adapter serializes Date values without a zone suffix.
     // A UTC session prevents the database server's local timezone from shifting
     // security-sensitive expiry, rotation, lease, and audit timestamps.

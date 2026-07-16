@@ -21,6 +21,10 @@ const environmentSchema = z.object({
     message: 'must use the postgresql:// scheme',
   }),
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100),
+  DATABASE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(60_000),
+  DATABASE_IDLE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000),
+  DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000),
+  DATABASE_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000),
   REDIS_URL: z
     .string()
     .refine((value) => value.startsWith('redis://') || value.startsWith('rediss://'), {
@@ -93,6 +97,10 @@ export function validateEnvironment(raw: Record<string, unknown>): Environment {
         ? undefined
         : 'postgresql://voiceverse:voiceverse_local_only@localhost:5432/voiceverse'),
     DATABASE_POOL_MAX: raw.DATABASE_POOL_MAX ?? '10',
+    DATABASE_CONNECTION_TIMEOUT_MS: raw.DATABASE_CONNECTION_TIMEOUT_MS ?? '5000',
+    DATABASE_IDLE_TIMEOUT_MS: raw.DATABASE_IDLE_TIMEOUT_MS ?? '30000',
+    DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: raw.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS ?? '30000',
+    DATABASE_STATEMENT_TIMEOUT_MS: raw.DATABASE_STATEMENT_TIMEOUT_MS ?? '30000',
     REDIS_URL: raw.REDIS_URL ?? (isProduction ? undefined : 'redis://localhost:6379/0'),
     WEB_ORIGIN: raw.WEB_ORIGIN ?? (isProduction ? undefined : 'http://localhost:3000'),
     WEB_AUTH_SUCCESS_URL:

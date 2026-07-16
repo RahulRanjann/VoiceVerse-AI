@@ -7,7 +7,9 @@ VoiceVerse AI is a production-oriented multilingual dubbing platform. This repos
 **Milestone 1: Tenant identity and secure media ingest** is implemented. The current
 vertical slice includes Google OIDC, organization-scoped sessions, projects, direct
 resumable multipart upload, quarantine, and asynchronous malware scanning. AI pipeline
-stages begin after the clean-media gate in Milestone 2.
+stages begin after the clean-media gate in Milestone 3. **Milestone 2: Vercel and
+Supabase cloud foundation** is repository-ready; account provisioning remains an operator
+step.
 
 ## Repository map
 
@@ -89,3 +91,8 @@ pnpm --filter @voiceverse/web test:e2e
 ```
 
 Architecture decisions live in [`docs/architecture/adr`](docs/architecture/adr). Do not bypass those boundaries without replacing the relevant ADR.
+
+The production web/database deployment contract is documented in
+[`docs/deployment/vercel-supabase.md`](docs/deployment/vercel-supabase.md). Vercel hosts
+the web tier; Supabase supplies private managed PostgreSQL. The API and workers remain
+container workloads.

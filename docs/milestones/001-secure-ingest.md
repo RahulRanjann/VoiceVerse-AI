@@ -121,4 +121,5 @@ workers from queue latency; do not autoscale scanner memory blindly.
 - Organization switching, invitations, passkeys, and enterprise SSO.
 - Managed malware scanning and content-disarm policy where required.
 - Checksums per part/object, lifecycle expiration, and multi-region transfer acceleration.
-- Durable dubbing job/stage/attempt state machine in Milestone 2.
+- Durable dubbing job/stage/attempt state machine in Milestone 3, after the cloud
+  foundation prerequisite.

@@ -13,11 +13,11 @@ flowchart LR
     S3[Managed S3]
     Scanner[Malware scanner]
 
-    Creator --> Web[Next.js web application]
+    Creator --> Web[Next.js web application on Vercel]
     Partner --> API[NestJS control plane]
     Web --> API
     API --> IdP
-    API --> DB[(PostgreSQL)]
+    API --> DB[(Supabase PostgreSQL)]
     API --> Queue[(Redis and BullMQ)]
     API --> S3
     Web -->|Short-lived signed multipart URLs| S3
@@ -38,13 +38,13 @@ The initial system is a modular monolith with one justified service boundary:
 ```mermaid
 flowchart TB
     subgraph ControlPlane[CPU control plane]
-        Web[Next.js]
+        Web[Next.js on Vercel]
         API[NestJS modular monolith]
         Worker[Node workflow workers]
     end
 
     subgraph State[Authoritative state and transport]
-        Postgres[(PostgreSQL)]
+        Postgres[(Supabase PostgreSQL)]
         Redis[(Redis)]
         Objects[(S3 object storage)]
     end
