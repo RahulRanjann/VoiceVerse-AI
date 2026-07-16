@@ -44,6 +44,12 @@ jobs:
       - name: Run TypeScript quality gates
         run: pnpm turbo run lint typecheck test build --filter='!@voiceverse/ai-service'
 
+      - name: Install Playwright Chromium
+        run: pnpm --filter @voiceverse/web exec playwright install --with-deps chromium
+
+      - name: Run browser acceptance tests
+        run: pnpm --filter @voiceverse/web test:e2e
+
   python-quality:
     name: Python quality gates
     runs-on: ubuntu-latest

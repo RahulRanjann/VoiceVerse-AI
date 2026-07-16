@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module';
 import { DatabaseService } from '../src/infrastructure/database/database.service';
 import { RedisService } from '../src/infrastructure/redis/redis.service';
+import { OBJECT_STORAGE } from '../src/modules/media-ingest/domain/object-storage.port';
 
 describe('health HTTP contracts', () => {
   let app: NestFastifyApplication;
@@ -15,6 +16,8 @@ describe('health HTTP contracts', () => {
       .overrideProvider(DatabaseService)
       .useValue({ ping: vi.fn().mockResolvedValue(undefined) })
       .overrideProvider(RedisService)
+      .useValue({ ping: vi.fn().mockResolvedValue(undefined) })
+      .overrideProvider(OBJECT_STORAGE)
       .useValue({ ping: vi.fn().mockResolvedValue(undefined) })
       .compile();
 
@@ -45,6 +48,7 @@ describe('health HTTP contracts', () => {
       checks: {
         database: { status: 'up' },
         redis: { status: 'up' },
+        storage: { status: 'up' },
       },
     });
   });

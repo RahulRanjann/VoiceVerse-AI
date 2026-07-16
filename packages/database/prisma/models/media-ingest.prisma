@@ -1,0 +1,133 @@
+enum VideoIngestStatus {
+  AWAITING_UPLOAD @map("awaiting_upload")
+  UPLOADING       @map("uploading")
+  UPLOADED        @map("uploaded")
+  ABORTED         @map("aborted")
+  FAILED          @map("failed")
+
+  @@map("video_ingest_status")
+}
+
+enum MediaSecurityStatus {
+  PENDING  @map("pending")
+  SCANNING @map("scanning")
+  CLEAN    @map("clean")
+  INFECTED @map("infected")
+  ERROR    @map("error")
+
+  @@map("media_security_status")
+}
+
+enum MultipartUploadStatus {
+  INITIATED  @map("initiated")
+  COMPLETING @map("completing")
+  COMPLETED  @map("completed")
+  ABORTED    @map("aborted")
+  EXPIRED    @map("expired")
+  FAILED     @map("failed")
+
+  @@map("multipart_upload_status")
+}
+
+enum MalwareScanStatus {
+  QUEUED   @map("queued")
+  RUNNING  @map("running")
+  CLEAN    @map("clean")
+  INFECTED @map("infected")
+  ERROR    @map("error")
+
+  @@map("malware_scan_status")
+}
+
+model Video {
+  id               String              @id @db.Uuid
+  organizationId   String              @map("organization_id") @db.Uuid
+  projectId        String              @map("project_id") @db.Uuid
+  createdByUserId  String              @map("created_by_user_id") @db.Uuid
+  originalFilename String              @map("original_filename") @db.VarChar(255)
+  mediaType        String              @map("media_type") @db.VarChar(127)
+  byteSize         BigInt              @map("byte_size")
+  sha256           String?             @db.Char(64)
+  storageBucket    String              @map("storage_bucket") @db.VarChar(255)
+  storageKey       String              @map("storage_key") @db.Text
+  storageEtag      String?             @map("storage_etag") @db.VarChar(512)
+  ingestStatus     VideoIngestStatus   @default(AWAITING_UPLOAD) @map("ingest_status")
+  securityStatus   MediaSecurityStatus @default(PENDING) @map("security_status")
+  uploadedAt       DateTime?           @map("uploaded_at") @db.Timestamptz(6)
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project          Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  createdBy        User                 @relation("VideoCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  multipartUploads MultipartUpload[]
+  scanAttempts     MalwareScanAttempt[]
+
+  @@unique([storageBucket, storageKey], map: "videos_storage_location_key")
+  @@index([organizationId, createdAt(sort: Desc)], map: "videos_org_created_idx")
+  @@index([projectId, createdAt(sort: Desc)], map: "videos_project_created_idx")
+  @@index([createdByUserId], map: "videos_created_by_user_id_idx")
+  @@index([organizationId, securityStatus, createdAt], map: "videos_org_security_created_idx")
+  @@map("videos")
+}
+
+model MultipartUpload {
+  id               String                @id @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  videoId          String                @map("video_id") @db.Uuid
+  providerUploadId String                @unique(map: "multipart_uploads_provider_upload_id_key") @map("provider_upload_id") @db.Text
+  idempotencyKey   String                @map("idempotency_key") @db.VarChar(128)
+  partSize         Int                   @map("part_size")
+  totalParts       Int                   @map("total_parts")
+  status           MultipartUploadStatus @default(INITIATED)
+  expiresAt        DateTime              @map("expires_at") @db.Timestamptz(6)
+  completedAt      DateTime?             @map("completed_at") @db.Timestamptz(6)
+  abortedAt        DateTime?             @map("aborted_at") @db.Timestamptz(6)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  video        Video                 @relation(fields: [videoId], references: [id], onDelete: Restrict)
+  parts        MultipartUploadPart[]
+
+  @@unique([organizationId, idempotencyKey], map: "multipart_uploads_org_idempotency_key")
+  @@index([videoId, status], map: "multipart_uploads_video_status_idx")
+  @@index([organizationId, status, expiresAt], map: "multipart_uploads_org_status_expires_idx")
+  @@map("multipart_uploads")
+}
+
+model MultipartUploadPart {
+  id                String   @id @db.Uuid
+  multipartUploadId String   @map("multipart_upload_id") @db.Uuid
+  partNumber        Int      @map("part_number")
+  etag              String   @db.VarChar(512)
+  byteSize          BigInt?  @map("byte_size")
+  checksumSha256    String?  @map("checksum_sha256") @db.Char(64)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  multipartUpload MultipartUpload @relation(fields: [multipartUploadId], references: [id], onDelete: Cascade)
+
+  @@unique([multipartUploadId, partNumber], map: "multipart_upload_parts_upload_part_key")
+  @@map("multipart_upload_parts")
+}
+
+model MalwareScanAttempt {
+  id               String            @id @db.Uuid
+  videoId          String            @map("video_id") @db.Uuid
+  attemptNumber    Int               @map("attempt_number")
+  status           MalwareScanStatus @default(QUEUED)
+  engine           String            @db.VarChar(100)
+  engineVersion    String?           @map("engine_version") @db.VarChar(100)
+  signatureVersion String?           @map("signature_version") @db.VarChar(100)
+  findingName      String?           @map("finding_name") @db.VarChar(255)
+  errorCode        String?           @map("error_code") @db.VarChar(100)
+  startedAt        DateTime?         @map("started_at") @db.Timestamptz(6)
+  completedAt      DateTime?         @map("completed_at") @db.Timestamptz(6)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  video Video @relation(fields: [videoId], references: [id], onDelete: Restrict)
+
+  @@unique([videoId, attemptNumber], map: "malware_scan_attempts_video_attempt_key")
+  @@index([status, createdAt], map: "malware_scan_attempts_status_created_idx")
+  @@map("malware_scan_attempts")
+}

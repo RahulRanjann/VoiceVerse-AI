@@ -64,12 +64,28 @@ services:
       - >-
         until mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"; do sleep 1; done;
         mc mb --ignore-existing "local/$${S3_BUCKET}";
+        mc cors set "local/$${S3_BUCKET}" /config/cors.xml;
         mc anonymous set none "local/$${S3_BUCKET}"
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_BUCKET: ${S3_BUCKET}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
     restart: 'no'
+    volumes:
+      - ../minio/cors.xml:/config/cors.xml:ro
+    networks: [voiceverse]
+
+  clamav:
+    # Cisco's official image currently publishes linux/amd64 only. Apple Silicon
+    # uses Docker's emulation; Kubernetes pins scanner pods to an amd64 node pool.
+    platform: ${CLAMAV_PLATFORM:-linux/amd64}
+    build:
+      context: ../..
+      dockerfile: infrastructure/clamav/Dockerfile
+    expose: ['3310']
+    restart: unless-stopped
+    volumes:
+      - clamav_data:/var/lib/clamav
     networks: [voiceverse]
 
   web:
@@ -104,6 +120,7 @@ services:
       context: ../..
       dockerfile: apps/api/Dockerfile
     depends_on:
+      minio-init: { condition: service_completed_successfully }
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     environment:
@@ -119,7 +136,16 @@ services:
       OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-voiceverse}
       OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
       REDIS_URL: redis://redis:6379/0
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_SSE_ALGORITHM: ${S3_SSE_ALGORITHM:-none}
       WEB_ORIGIN: http://localhost:${WEB_PORT:-3000}
+      WEB_AUTH_SUCCESS_URL: http://localhost:${WEB_PORT:-3000}
     ports:
       - '127.0.0.1:${API_PORT:-3001}:3001'
     healthcheck:
@@ -134,6 +160,58 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    read_only: true
+    restart: unless-stopped
+    tmpfs: [/tmp]
+    networks: [voiceverse]
+
+  worker:
+    profiles: [application]
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    command: ['node', 'dist/worker.js']
+    depends_on:
+      clamav: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    environment:
+      APP_VERSION: ${APP_VERSION:-development}
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: 3310
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: ${NODE_ENV:-development}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_SERVICE_NAME: voiceverse-worker
+      OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-voiceverse}
+      OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
+      REDIS_URL: redis://redis:6379/0
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_SSE_ALGORITHM: ${S3_SSE_ALGORITHM:-none}
+      WEB_AUTH_SUCCESS_URL: http://localhost:${WEB_PORT:-3000}
+      WEB_ORIGIN: http://localhost:${WEB_PORT:-3000}
+      WORKER_HOST: 0.0.0.0
+      WORKER_PORT: 3002
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3002/health/live').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 180s
     read_only: true
     restart: unless-stopped
     tmpfs: [/tmp]
@@ -238,6 +316,7 @@ networks:
     name: voiceverse
 
 volumes:
+  clamav_data:
   grafana_data:
   loki_data:
   minio_data:

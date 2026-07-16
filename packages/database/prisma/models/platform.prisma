@@ -19,7 +19,7 @@ model AuditLog {
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  actor         User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  actor        User?         @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([organizationId, createdAt(sort: Desc)], map: "audit_logs_org_created_idx")
   @@index([actorUserId, createdAt(sort: Desc)], map: "audit_logs_actor_created_idx")
@@ -28,23 +28,26 @@ model AuditLog {
 }
 
 model OutboxEvent {
-  id             String       @id @db.Uuid
-  organizationId String?      @map("organization_id") @db.Uuid
-  aggregateType  String       @map("aggregate_type") @db.VarChar(100)
-  aggregateId    String       @map("aggregate_id") @db.Uuid
-  eventType      String       @map("event_type") @db.VarChar(160)
-  eventVersion   Int          @default(1) @map("event_version")
-  payload        Json
-  status         OutboxStatus @default(PENDING)
-  attemptCount   Int          @default(0) @map("attempt_count")
-  availableAt    DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
-  occurredAt     DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
-  publishedAt    DateTime?    @map("published_at") @db.Timestamptz(6)
-  lastError      String?      @map("last_error") @db.Text
+  id               String       @id @db.Uuid
+  organizationId   String?      @map("organization_id") @db.Uuid
+  aggregateType    String       @map("aggregate_type") @db.VarChar(100)
+  aggregateId      String       @map("aggregate_id") @db.Uuid
+  eventType        String       @map("event_type") @db.VarChar(160)
+  deduplicationKey String       @unique(map: "outbox_events_deduplication_key_key") @map("deduplication_key") @db.VarChar(191)
+  eventVersion     Int          @default(1) @map("event_version")
+  payload          Json
+  status           OutboxStatus @default(PENDING)
+  attemptCount     Int          @default(0) @map("attempt_count")
+  availableAt      DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  occurredAt       DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  publishedAt      DateTime?    @map("published_at") @db.Timestamptz(6)
+  lastError        String?      @map("last_error") @db.Text
+  leaseId          String?      @map("lease_id") @db.Uuid
+  leasedUntil      DateTime?    @map("leased_until") @db.Timestamptz(6)
 
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Restrict)
 
-  @@index([status, availableAt], map: "outbox_events_dispatch_idx")
+  @@index([status, availableAt, leasedUntil], map: "outbox_events_dispatch_idx")
   @@index([aggregateType, aggregateId, occurredAt], map: "outbox_events_aggregate_idx")
   @@map("outbox_events")
 }

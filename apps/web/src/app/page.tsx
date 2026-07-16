@@ -1,5 +1,10 @@
-import { redirect } from 'next/navigation';
+import { AuthGate } from '@/features/auth/auth-gate';
+import { StudioDashboard } from '@/features/studio/studio-dashboard';
 
 export default function Home() {
-  redirect('/api/health');
+  return (
+    <AuthGate>
+      <StudioDashboard />
+    </AuthGate>
+  );
 }

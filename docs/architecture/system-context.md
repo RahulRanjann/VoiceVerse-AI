@@ -11,14 +11,19 @@ flowchart LR
     LLM[Translation and reasoning providers]
     Lip[Lip-sync providers]
     S3[Managed S3]
+    Scanner[Malware scanner]
 
     Creator --> Web[Next.js web application]
     Partner --> API[NestJS control plane]
     Web --> API
-    Web --> IdP
+    API --> IdP
     API --> DB[(PostgreSQL)]
     API --> Queue[(Redis and BullMQ)]
     API --> S3
+    Web -->|Short-lived signed multipart URLs| S3
+    Queue --> Worker[Node media-security worker]
+    Worker --> S3
+    Worker --> Scanner
     Queue --> AI[Python AI execution plane]
     AI --> S3
     AI --> TTS
@@ -44,6 +49,8 @@ flowchart TB
         Objects[(S3 object storage)]
     end
 
+    Scanner[ClamAV scanner]
+
     subgraph ComputePlane[Elastic AI compute plane]
         Gateway[FastAPI internal API]
         CPU[CPU media workers]
@@ -56,6 +63,7 @@ flowchart TB
     Worker --> Postgres
     Worker --> Redis
     Worker --> Objects
+    Worker --> Scanner
     Redis --> CPU
     Redis --> GPU
     CPU --> Objects
@@ -65,6 +73,47 @@ flowchart TB
 ```
 
 NestJS owns tenant-aware business state, permissions, workflow policy, billing, audit, and public APIs. Python owns model execution and media/ML runtime concerns. Model providers never write business state directly.
+
+## Secure ingest sequence
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant API as NestJS API
+    participant DB as PostgreSQL
+    participant S3 as Private S3 bucket
+    participant Relay as Outbox relay
+    participant Queue as BullMQ
+    participant Worker as Security worker
+    participant Scanner as ClamAV
+
+    Browser->>API: Create tenant-owned project and multipart upload
+    API->>DB: Transaction: project, video, upload, audit state
+    API->>S3: CreateMultipartUpload using immutable object key
+    API-->>Browser: Upload ID, part size, short-lived signing contract
+    loop Bounded signing batches
+        Browser->>API: Request signed part URLs
+        API-->>Browser: Exact part URLs and content lengths
+        Browser->>S3: PUT file parts directly
+    end
+    Browser->>API: Submit ordered ETag and size manifest
+    API->>DB: Persist completion intent and immutable manifest
+    API->>S3: CompleteMultipartUpload
+    opt Provider response is ambiguous
+        API->>S3: HEAD immutable object and reconcile size
+    end
+    API->>DB: Transaction: uploaded state and deduplicated outbox event
+    Relay->>Queue: Publish scan command with idempotency key
+    Queue->>Worker: At-least-once scan delivery
+    Worker->>S3: Stream quarantined object
+    Worker->>Scanner: clamd INSTREAM frames
+    Scanner-->>Worker: Clean, infected, or stable error verdict
+    Worker->>DB: Persist scan attempt and terminal security state
+```
+
+Uploaded objects are never eligible for AI processing until the authoritative video
+security state is `clean`. Browser checkpoints contain identifiers and completed-part
+metadata only; credentials and file bytes are not persisted in web storage.
 
 ## Initial bounded contexts
 

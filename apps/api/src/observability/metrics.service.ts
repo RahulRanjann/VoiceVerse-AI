@@ -9,8 +9,9 @@ export class MetricsService {
   private readonly registry = new Registry();
 
   constructor(config: ConfigService<Environment, true>) {
+    const serviceName = config.get('OTEL_SERVICE_NAME', { infer: true });
     this.registry.setDefaultLabels({
-      service: 'voiceverse-api',
+      service: serviceName,
       version: config.get('APP_VERSION', { infer: true }),
     });
 
@@ -20,7 +21,7 @@ export class MetricsService {
     });
 
     const serviceInfo = new Gauge({
-      name: 'voiceverse_api_service_info',
+      name: 'voiceverse_service_info',
       help: 'Static service build information.',
       labelNames: ['version'] as const,
       registers: [this.registry],

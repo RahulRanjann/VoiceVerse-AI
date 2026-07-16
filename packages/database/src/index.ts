@@ -23,6 +23,10 @@ export function createDatabaseClient(options: DatabaseClientOptions): PrismaClie
   const adapter = new PrismaPg({
     connectionString: options.connectionString,
     max: options.maxConnections ?? 10,
+    // Prisma's driver adapter serializes Date values without a zone suffix.
+    // A UTC session prevents the database server's local timezone from shifting
+    // security-sensitive expiry, rotation, lease, and audit timestamps.
+    options: '-c timezone=UTC',
   });
 
   return new PrismaClient({

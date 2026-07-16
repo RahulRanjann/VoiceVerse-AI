@@ -1,0 +1,63 @@
+enum ProjectStatus {
+  DRAFT      @map("draft")
+  INGESTING  @map("ingesting")
+  PROCESSING @map("processing")
+  READY      @map("ready")
+  FAILED     @map("failed")
+  ARCHIVED   @map("archived")
+
+  @@map("project_status")
+}
+
+model Language {
+  id          String   @id @db.Uuid
+  bcp47Tag    String   @unique(map: "languages_bcp47_tag_key") @map("bcp47_tag") @db.VarChar(35)
+  englishName String   @map("english_name") @db.VarChar(100)
+  nativeName  String   @map("native_name") @db.VarChar(100)
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceProjects Project[]               @relation("ProjectSourceLanguage")
+  targetProjects ProjectTargetLanguage[]
+
+  @@index([enabled, englishName], map: "languages_enabled_name_idx")
+  @@map("languages")
+}
+
+model Project {
+  id               String        @id @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  createdByUserId  String        @map("created_by_user_id") @db.Uuid
+  sourceLanguageId String        @map("source_language_id") @db.Uuid
+  name             String        @db.VarChar(160)
+  status           ProjectStatus @default(DRAFT)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt       DateTime?     @map("archived_at") @db.Timestamptz(6)
+
+  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdBy       User                    @relation("ProjectCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  sourceLanguage  Language                @relation("ProjectSourceLanguage", fields: [sourceLanguageId], references: [id], onDelete: Restrict)
+  targetLanguages ProjectTargetLanguage[]
+  videos          Video[]
+
+  @@index([organizationId, updatedAt(sort: Desc)], map: "projects_org_updated_idx")
+  @@index([organizationId, status, updatedAt(sort: Desc)], map: "projects_org_status_updated_idx")
+  @@index([createdByUserId], map: "projects_created_by_user_id_idx")
+  @@index([sourceLanguageId], map: "projects_source_language_id_idx")
+  @@map("projects")
+}
+
+model ProjectTargetLanguage {
+  id         String   @id @db.Uuid
+  projectId  String   @map("project_id") @db.Uuid
+  languageId String   @map("language_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  language Language @relation(fields: [languageId], references: [id], onDelete: Restrict)
+
+  @@unique([projectId, languageId], map: "project_target_languages_project_language_key")
+  @@index([languageId], map: "project_target_languages_language_id_idx")
+  @@map("project_target_languages")
+}

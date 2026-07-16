@@ -23,6 +23,12 @@ enum OrganizationRole {
   @@map("organization_role")
 }
 
+enum IdentityProvider {
+  GOOGLE @map("google")
+
+  @@map("identity_provider")
+}
+
 model User {
   id          String     @id @db.Uuid
   email       String     @unique(map: "users_email_key") @db.VarChar(320)
@@ -33,8 +39,12 @@ model User {
   updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
-  memberships OrganizationMembership[]
-  auditLogs   AuditLog[]                @relation("AuditActor")
+  memberships     OrganizationMembership[]
+  auditLogs       AuditLog[]               @relation("AuditActor")
+  identities      ExternalIdentity[]
+  sessions        AuthSession[]
+  projectsCreated Project[]                @relation("ProjectCreator")
+  videosCreated   Video[]                  @relation("VideoCreator")
 
   @@index([status], map: "users_status_idx")
   @@map("users")
@@ -49,12 +59,75 @@ model Organization {
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime?          @map("deleted_at") @db.Timestamptz(6)
 
-  memberships OrganizationMembership[]
-  auditLogs   AuditLog[]
-  outboxEvents OutboxEvent[]
+  memberships      OrganizationMembership[]
+  auditLogs        AuditLog[]
+  outboxEvents     OutboxEvent[]
+  projects         Project[]
+  videos           Video[]
+  multipartUploads MultipartUpload[]
+  authSessions     AuthSession[]
 
   @@index([status], map: "organizations_status_idx")
   @@map("organizations")
+}
+
+model ExternalIdentity {
+  id              String           @id @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  provider        IdentityProvider
+  providerSubject String           @map("provider_subject") @db.VarChar(191)
+  emailAtLink     String           @map("email_at_link") @db.VarChar(320)
+  lastLoginAt     DateTime         @default(now()) @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerSubject], map: "external_identities_provider_subject_key")
+  @@index([userId], map: "external_identities_user_id_idx")
+  @@map("external_identities")
+}
+
+model OAuthAuthorization {
+  id                     String           @id @db.Uuid
+  provider               IdentityProvider
+  stateHash              String           @unique(map: "oauth_authorizations_state_hash_key") @map("state_hash") @db.Char(64)
+  nonceHash              String           @map("nonce_hash") @db.Char(64)
+  codeVerifierCiphertext String           @map("code_verifier_ciphertext") @db.Text
+  redirectPath           String           @map("redirect_path") @db.VarChar(512)
+  expiresAt              DateTime         @map("expires_at") @db.Timestamptz(6)
+  consumedAt             DateTime?        @map("consumed_at") @db.Timestamptz(6)
+  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([expiresAt], map: "oauth_authorizations_expires_at_idx")
+  @@map("oauth_authorizations")
+}
+
+model AuthSession {
+  id                  String    @id @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  organizationId      String    @map("organization_id") @db.Uuid
+  familyId            String    @map("family_id") @db.Uuid
+  refreshTokenHash    String    @unique(map: "auth_sessions_refresh_token_hash_key") @map("refresh_token_hash") @db.Char(64)
+  userAgentHash       String?   @map("user_agent_hash") @db.Char(64)
+  ipAddressHash       String?   @map("ip_address_hash") @db.Char(64)
+  replacedBySessionId String?   @unique(map: "auth_sessions_replaced_by_session_id_key") @map("replaced_by_session_id") @db.Uuid
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  lastSeenAt          DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  rotatedAt           DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt           DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  replacedBy   AuthSession? @relation("SessionRotation", fields: [replacedBySessionId], references: [id], onDelete: SetNull)
+  replaces     AuthSession? @relation("SessionRotation")
+
+  @@index([userId, expiresAt], map: "auth_sessions_user_expires_idx")
+  @@index([organizationId, userId, expiresAt], map: "auth_sessions_org_user_expires_idx")
+  @@index([familyId], map: "auth_sessions_family_id_idx")
+  @@index([expiresAt], map: "auth_sessions_expires_at_idx")
+  @@map("auth_sessions")
 }
 
 model OrganizationMembership {

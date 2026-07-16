@@ -31,5 +31,5 @@ WORKDIR /app
 COPY --from=build --chown=node:node /opt/voiceverse-api ./
 
 USER node
-EXPOSE 3001
+EXPOSE 3001 3002
 CMD ["node", "dist/main.js"]

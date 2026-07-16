@@ -27,6 +27,9 @@ export default tseslint.config(
   {
     files: ['test/**/*.ts', 'src/**/*.spec.ts'],
     rules: {
+      // Vitest's asymmetric matchers intentionally expose `any` so they can be
+      // embedded in strongly typed expected-object literals.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
       '@typescript-eslint/unbound-method': 'off',
     },
   },

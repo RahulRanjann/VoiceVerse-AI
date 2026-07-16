@@ -12,6 +12,11 @@ scrape_configs:
     static_configs:
       - targets: ['api:3001']
 
+  - job_name: voiceverse-worker
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['worker:3002']
+
   - job_name: voiceverse-ai
     metrics_path: /metrics
     static_configs:
