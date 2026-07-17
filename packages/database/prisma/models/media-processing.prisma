@@ -1,0 +1,199 @@
+enum MediaArtifactKind {
+  PROBE_MANIFEST                    @map("probe_manifest")
+  CANONICAL_AUDIO                   @map("canonical_audio")
+  ANALYSIS_AUDIO                    @map("analysis_audio")
+  VOCAL_SEPARATION_MANIFEST         @map("vocal_separation_manifest")
+  VOCAL_STEM_AUDIO                  @map("vocal_stem_audio")
+  ACCOMPANIMENT_STEM_AUDIO          @map("accompaniment_stem_audio")
+  SPEECH_ANALYSIS_AUDIO             @map("speech_analysis_audio")
+  TRANSCRIPTION_MANIFEST            @map("transcription_manifest")
+  DIARIZATION_MANIFEST              @map("diarization_manifest")
+  CHARACTER_IDENTIFICATION_MANIFEST @map("character_identification_manifest")
+
+  @@map("media_artifact_kind")
+}
+
+enum MediaStreamKind {
+  AUDIO    @map("audio")
+  VIDEO    @map("video")
+  SUBTITLE @map("subtitle")
+  OTHER    @map("other")
+
+  @@map("media_stream_kind")
+}
+
+enum MediaTrackRole {
+  PRIMARY_AUDIO @map("primary_audio")
+
+  @@map("media_track_role")
+}
+
+model MediaArtifact {
+  id                String            @id @db.Uuid
+  organizationId    String            @map("organization_id") @db.Uuid
+  projectId         String            @map("project_id") @db.Uuid
+  sourceVideoId     String            @map("source_video_id") @db.Uuid
+  producerAttemptId String            @map("producer_attempt_id") @db.Uuid
+  kind              MediaArtifactKind
+  mediaType         String            @map("media_type") @db.VarChar(127)
+  byteSize          BigInt            @map("byte_size")
+  sha256            String            @db.Char(64)
+  storageBucket     String            @map("storage_bucket") @db.VarChar(255)
+  storageKey        String            @map("storage_key") @db.Text
+  storageEtag       String?           @map("storage_etag") @db.VarChar(512)
+  producerName      String            @map("producer_name") @db.VarChar(100)
+  producerVersion   String            @map("producer_version") @db.VarChar(100)
+  configurationHash String            @map("configuration_hash") @db.Char(64)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization                     Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project                          Project                      @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  sourceVideo                      Video                        @relation(fields: [sourceVideoId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  producerAttempt                  WorkflowStageAttempt         @relation(fields: [producerAttemptId], references: [id], onDelete: Restrict)
+  audioMetadata                    MediaAudioArtifact?
+  manifestProbe                    MediaProbe?                  @relation("ProbeManifestArtifact")
+  inputLineage                     ArtifactLineage[]            @relation("ArtifactLineageInput")
+  outputLineage                    ArtifactLineage[]            @relation("ArtifactLineageOutput")
+  workflowJobInputs                WorkflowJobArtifactInput[]   @relation("WorkflowJobArtifactInputArtifact")
+  transcriptionInputs              TranscriptionRun[]           @relation("TranscriptionInputArtifact")
+  transcriptionManifests           TranscriptionRun[]           @relation("TranscriptionManifestArtifact")
+  diarizationInputs                DiarizationRun[]             @relation("DiarizationInputArtifact")
+  diarizationManifests             DiarizationRun[]             @relation("DiarizationManifestArtifact")
+  characterIdentificationManifests CharacterIdentificationRun[] @relation("CharacterIdentificationManifestArtifact")
+
+  @@unique([storageBucket, storageKey], map: "media_artifacts_storage_location_key")
+  @@unique([producerAttemptId, kind], map: "media_artifacts_attempt_kind_key")
+  @@unique([id, organizationId, projectId, sourceVideoId], map: "media_artifacts_id_tenant_source_key")
+  @@index([organizationId, createdAt(sort: Desc), id(sort: Desc)], map: "media_artifacts_org_created_idx")
+  @@index([projectId, kind, createdAt(sort: Desc)], map: "media_artifacts_project_kind_created_idx")
+  @@index([sourceVideoId], map: "media_artifacts_source_video_id_idx")
+  @@map("media_artifacts")
+}
+
+model MediaAudioArtifact {
+  artifactId    String  @id @map("artifact_id") @db.Uuid
+  codecName     String  @map("codec_name") @db.VarChar(40)
+  sampleRateHz  Int     @map("sample_rate_hz")
+  channels      Int
+  channelLayout String? @map("channel_layout") @db.VarChar(80)
+  durationMs    BigInt  @map("duration_ms")
+  durationUs    BigInt? @map("duration_us")
+  bitDepth      Int?    @map("bit_depth")
+
+  artifact MediaArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade)
+
+  @@map("media_audio_artifacts")
+}
+
+model ArtifactLineage {
+  id               String   @id @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  sourceVideoId    String   @map("source_video_id") @db.Uuid
+  outputArtifactId String   @map("output_artifact_id") @db.Uuid
+  inputArtifactId  String?  @map("input_artifact_id") @db.Uuid
+  inputVideoId     String?  @map("input_video_id") @db.Uuid
+  role             String   @db.VarChar(80)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  outputArtifact MediaArtifact  @relation("ArtifactLineageOutput", fields: [outputArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Cascade)
+  inputArtifact  MediaArtifact? @relation("ArtifactLineageInput", fields: [inputArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  inputVideo     Video?         @relation(fields: [inputVideoId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+
+  @@unique([outputArtifactId, inputArtifactId, role], map: "artifact_lineage_artifact_role_key")
+  @@unique([outputArtifactId, inputVideoId, role], map: "artifact_lineage_video_role_key")
+  @@index([inputArtifactId], map: "artifact_lineage_input_artifact_idx")
+  @@index([inputVideoId], map: "artifact_lineage_input_video_idx")
+  @@map("artifact_lineage")
+}
+
+model MediaProbe {
+  id                 String   @id @db.Uuid
+  sourceVideoId      String   @map("source_video_id") @db.Uuid
+  attemptId          String   @map("attempt_id") @db.Uuid
+  manifestArtifactId String   @unique(map: "media_probes_manifest_artifact_key") @map("manifest_artifact_id") @db.Uuid
+  contractVersion    Int      @map("contract_version")
+  ffprobeVersion     String   @map("ffprobe_version") @db.VarChar(100)
+  formatName         String   @map("format_name") @db.VarChar(100)
+  durationMs         BigInt   @map("duration_ms")
+  startTimeMs        BigInt?  @map("start_time_ms")
+  bitRate            BigInt?  @map("bit_rate")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceVideo      Video                 @relation(fields: [sourceVideoId], references: [id], onDelete: Restrict)
+  attempt          WorkflowStageAttempt  @relation(fields: [attemptId], references: [id], onDelete: Restrict)
+  manifestArtifact MediaArtifact         @relation("ProbeManifestArtifact", fields: [manifestArtifactId], references: [id], onDelete: Restrict)
+  streams          MediaStream[]
+  selections       MediaTrackSelection[]
+
+  @@unique([sourceVideoId, attemptId], map: "media_probes_video_attempt_key")
+  @@index([attemptId], map: "media_probes_attempt_id_idx")
+  @@map("media_probes")
+}
+
+model MediaStream {
+  id                  String          @id @db.Uuid
+  probeId             String          @map("probe_id") @db.Uuid
+  streamIndex         Int             @map("stream_index")
+  kind                MediaStreamKind
+  codecName           String?         @map("codec_name") @db.VarChar(80)
+  codecProfile        String?         @map("codec_profile") @db.VarChar(100)
+  durationMs          BigInt?         @map("duration_ms")
+  startTimeMs         BigInt?         @map("start_time_ms")
+  bitRate             BigInt?         @map("bit_rate")
+  timeBaseNumerator   Int?            @map("time_base_numerator")
+  timeBaseDenominator Int?            @map("time_base_denominator")
+  languageTag         String?         @map("language_tag") @db.VarChar(35)
+  defaultDisposition  Boolean         @default(false) @map("default_disposition")
+
+  probe      MediaProbe            @relation(fields: [probeId], references: [id], onDelete: Cascade)
+  audio      MediaAudioStream?
+  video      MediaVideoStream?
+  selections MediaTrackSelection[]
+
+  @@unique([probeId, streamIndex], map: "media_streams_probe_stream_index_key")
+  @@unique([id, probeId], map: "media_streams_id_probe_key")
+  @@map("media_streams")
+}
+
+model MediaAudioStream {
+  streamId      String  @id @map("stream_id") @db.Uuid
+  sampleRateHz  Int?    @map("sample_rate_hz")
+  channels      Int?
+  channelLayout String? @map("channel_layout") @db.VarChar(80)
+  sampleFormat  String? @map("sample_format") @db.VarChar(40)
+
+  stream MediaStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@map("media_audio_streams")
+}
+
+model MediaVideoStream {
+  streamId             String  @id @map("stream_id") @db.Uuid
+  width                Int?
+  height               Int?
+  frameRateNumerator   Int?    @map("frame_rate_numerator")
+  frameRateDenominator Int?    @map("frame_rate_denominator")
+  pixelFormat          String? @map("pixel_format") @db.VarChar(80)
+  rotationDegrees      Int?    @map("rotation_degrees")
+
+  stream MediaStream @relation(fields: [streamId], references: [id], onDelete: Cascade)
+
+  @@map("media_video_streams")
+}
+
+model MediaTrackSelection {
+  id              String         @id @db.Uuid
+  probeId         String         @map("probe_id") @db.Uuid
+  streamId        String         @map("stream_id") @db.Uuid
+  role            MediaTrackRole
+  selectionMethod String         @map("selection_method") @db.VarChar(80)
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  probe  MediaProbe  @relation(fields: [probeId], references: [id], onDelete: Cascade)
+  stream MediaStream @relation(fields: [streamId, probeId], references: [id, probeId], onDelete: Restrict)
+
+  @@unique([probeId, role], map: "media_track_selections_probe_role_key")
+  @@index([streamId], map: "media_track_selections_stream_id_idx")
+  @@map("media_track_selections")
+}

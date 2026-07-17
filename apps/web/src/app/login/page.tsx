@@ -1,11 +1,8 @@
-import { ArrowRightIcon, LanguagesIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
+import { LanguagesIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react';
 
-import { buttonVariants } from '@/components/ui/button';
-import { API_BASE_URL } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { GoogleSignInButton } from '@/features/auth/google-sign-in-button';
 
 export default function LoginPage() {
-  const signInUrl = `${API_BASE_URL}/auth/google/start?redirectPath=%2F`;
   return (
     <main className="grid min-h-screen place-items-center bg-background px-5 py-12">
       <section className="w-full max-w-md" aria-labelledby="sign-in-title">
@@ -26,10 +23,7 @@ export default function LoginPage() {
               review-ready exports.
             </p>
           </div>
-          <a className={cn(buttonVariants({ size: 'lg' }), 'mt-7 w-full')} href={signInUrl}>
-            Continue with Google
-            <ArrowRightIcon data-icon="inline-end" />
-          </a>
+          <GoogleSignInButton />
           <div className="mt-7 grid gap-3 border-t pt-6 text-sm text-muted-foreground">
             <p className="flex items-center gap-2">
               <ShieldCheckIcon aria-hidden="true" className="size-4 text-primary" />

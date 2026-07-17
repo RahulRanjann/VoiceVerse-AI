@@ -24,7 +24,8 @@ enum OrganizationRole {
 }
 
 enum IdentityProvider {
-  GOOGLE @map("google")
+  GOOGLE   @map("google")
+  SUPABASE @map("supabase")
 
   @@map("identity_provider")
 }
@@ -39,12 +40,13 @@ model User {
   updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime?  @map("deleted_at") @db.Timestamptz(6)
 
-  memberships     OrganizationMembership[]
-  auditLogs       AuditLog[]               @relation("AuditActor")
-  identities      ExternalIdentity[]
-  sessions        AuthSession[]
-  projectsCreated Project[]                @relation("ProjectCreator")
-  videosCreated   Video[]                  @relation("VideoCreator")
+  memberships         OrganizationMembership[]
+  auditLogs           AuditLog[]               @relation("AuditActor")
+  identities          ExternalIdentity[]
+  sessions            AuthSession[]
+  projectsCreated     Project[]                @relation("ProjectCreator")
+  videosCreated       Video[]                  @relation("VideoCreator")
+  workflowJobsCreated WorkflowJob[]            @relation("WorkflowJobCreator")
 
   @@index([status], map: "users_status_idx")
   @@map("users")
@@ -59,13 +61,18 @@ model Organization {
   updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt   DateTime?          @map("deleted_at") @db.Timestamptz(6)
 
-  memberships      OrganizationMembership[]
-  auditLogs        AuditLog[]
-  outboxEvents     OutboxEvent[]
-  projects         Project[]
-  videos           Video[]
-  multipartUploads MultipartUpload[]
-  authSessions     AuthSession[]
+  memberships            OrganizationMembership[]
+  auditLogs              AuditLog[]
+  outboxEvents           OutboxEvent[]
+  projects               Project[]
+  videos                 Video[]
+  multipartUploads       MultipartUpload[]
+  authSessions           AuthSession[]
+  workflowJobs           WorkflowJob[]
+  mediaArtifacts         MediaArtifact[]
+  speechAnalyses         SpeechAnalysis[]
+  characters             Character[]
+  localizationWorkspaces LocalizationWorkspace[]
 
   @@index([status], map: "organizations_status_idx")
   @@map("organizations")
@@ -138,8 +145,24 @@ model OrganizationMembership {
   createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  organization                       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user                               User                             @relation(fields: [userId], references: [id], onDelete: Restrict)
+  speechAnalysisSelections           ProjectSpeechAnalysisSelection[]
+  localizationWorkspacesCreated      LocalizationWorkspace[]          @relation("LocalizationWorkspaceCreator")
+  localizationTracksCreated          LocalizationTrack[]              @relation("LocalizationTrackCreator")
+  localizationScenesCreated          LocalizationScene[]              @relation("LocalizationSceneCreator")
+  localizationSceneRevisionsCreated  LocalizationSceneRevision[]      @relation("LocalizationSceneRevisionCreator")
+  localizationSceneSelectionsUpdated LocalizationSceneSelection[]     @relation("LocalizationSceneSelectionUpdater")
+  localizedDialoguesCreated          LocalizedDialogue[]              @relation("LocalizedDialogueCreator")
+  sourceDialogueRevisionsCreated     SourceDialogueRevision[]         @relation("SourceDialogueRevisionCreator")
+  sourceDialogueSelectionsUpdated    SourceDialogueSelection[]        @relation("SourceDialogueSelectionUpdater")
+  dialogueTranslationsCreated        DialogueTranslation[]            @relation("DialogueTranslationCreator")
+  translationRevisionsCreated        TranslationRevision[]            @relation("TranslationRevisionCreator")
+  translationSelectionsUpdated       TranslationSelection[]           @relation("TranslationSelectionUpdater")
+  glossaryEntriesCreated             GlossaryEntry[]                  @relation("GlossaryEntryCreator")
+  glossaryRevisionsCreated           GlossaryRevision[]               @relation("GlossaryRevisionCreator")
+  glossarySelectionsUpdated          GlossarySelection[]              @relation("GlossarySelectionUpdater")
+  translationGenerationsCreated      TranslationGeneration[]          @relation("TranslationGenerationCreator")
 
   @@unique([organizationId, userId], map: "organization_memberships_org_user_key")
   @@index([userId], map: "organization_memberships_user_id_idx")

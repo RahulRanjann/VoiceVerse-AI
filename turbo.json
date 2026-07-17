@@ -4,6 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
+      "env": ["NEXT_PUBLIC_API_BASE_URL"],
       "inputs": ["$TURBO_DEFAULT$", ".env*"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
@@ -16,7 +17,7 @@
       "outputs": []
     },
     "typecheck": {
-      "dependsOn": ["^build", "@voiceverse/database#build"],
+      "dependsOn": ["build", "^build", "@voiceverse/database#build"],
       "outputs": []
     },
     "test": {

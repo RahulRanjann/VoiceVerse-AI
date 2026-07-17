@@ -23,10 +23,14 @@ compute plane remain container workloads and will be deployed to a separate runt
 Production uses a custom same-site web/API domain pair such as `app.voiceverse.ai` and
 `api.voiceverse.ai`.
 
-Use Supabase as private managed PostgreSQL. VoiceVerse does not use Supabase Auth,
-Storage, Realtime, or the browser Data API in this phase. Disable the Data API and revoke
-its `anon`, `authenticated`, and `service_role` grants from application tables. All
-browser business operations continue through NestJS authorization and audit boundaries.
+Use Supabase as private managed PostgreSQL. VoiceVerse does not use Supabase Storage,
+Realtime, or the browser Data API in this phase. Disable the Data API and revoke its
+`anon`, `authenticated`, and `service_role` grants from application tables. Browser
+business operations continue through NestJS authorization and audit boundaries.
+
+ADR 0008 subsequently assigns browser identity and session issuance to Supabase Auth.
+That decision does not expose application tables through the Data API or move business
+authorization out of NestJS.
 
 Use separate database credentials and URLs:
 

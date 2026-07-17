@@ -1,27 +1,21 @@
 import { Module } from '@nestjs/common';
 
-import { AccessTokenService } from './application/access-token.service';
-import { AuthService } from './application/auth.service';
-import { SecureValuesService } from './application/secure-values.service';
-import { GOOGLE_IDENTITY_PROVIDER } from './domain/identity-provider.port';
-import { GoogleIdentityProvider } from './infrastructure/google-identity.provider';
+import { IdentityPrincipalService } from './application/identity-principal.service';
+import { EXTERNAL_ACCESS_TOKEN_VERIFIER } from './domain/external-access-token-verifier.port';
+import { SupabaseAccessTokenVerifier } from './infrastructure/supabase-access-token.verifier';
 import { AccessTokenGuard } from './presentation/access-token.guard';
 import { AuthController } from './presentation/auth.controller';
-import { CookieMutationGuard } from './presentation/cookie-mutation.guard';
 
 @Module({
   controllers: [AuthController],
-  exports: [AccessTokenGuard, AccessTokenService],
+  exports: [AccessTokenGuard, EXTERNAL_ACCESS_TOKEN_VERIFIER, IdentityPrincipalService],
   providers: [
     AccessTokenGuard,
-    AccessTokenService,
-    AuthService,
-    CookieMutationGuard,
-    GoogleIdentityProvider,
-    SecureValuesService,
+    IdentityPrincipalService,
+    SupabaseAccessTokenVerifier,
     {
-      provide: GOOGLE_IDENTITY_PROVIDER,
-      useExisting: GoogleIdentityProvider,
+      provide: EXTERNAL_ACCESS_TOKEN_VERIFIER,
+      useExisting: SupabaseAccessTokenVerifier,
     },
   ],
 })

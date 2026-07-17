@@ -9,8 +9,10 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { Session } from '@supabase/supabase-js';
 
-import { ApiError, apiRequest } from '@/lib/api';
+import { ApiError, apiRequest, apiRequestResult, type ApiResponse } from '@/lib/api';
+import { createClient } from '@/lib/supabase/client';
 
 export interface AuthPrincipal {
   user: {
@@ -27,15 +29,11 @@ export interface AuthPrincipal {
   };
 }
 
-interface SessionResponse extends AuthPrincipal {
-  accessToken: string;
-  expiresInSeconds: number;
-}
-
 interface AuthContextValue {
   principal: AuthPrincipal | null;
-  status: 'loading' | 'authenticated' | 'anonymous';
+  status: 'loading' | 'authenticated' | 'anonymous' | 'forbidden' | 'unavailable';
   request<T>(path: string, init?: RequestInit): Promise<T>;
+  requestResult<T>(path: string, init?: RequestInit): Promise<ApiResponse<T>>;
   logout(): Promise<void>;
 }
 
@@ -45,79 +43,121 @@ export function AuthProvider({ children }: Readonly<{ children: React.ReactNode 
   const [status, setStatus] = useState<AuthContextValue['status']>('loading');
   const [principal, setPrincipal] = useState<AuthPrincipal | null>(null);
   const accessToken = useRef<string | null>(null);
-  const refreshPromise = useRef<Promise<SessionResponse | null> | null>(null);
-  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionPromise = useRef<Promise<Session | null> | null>(null);
 
-  const refresh = useCallback(async (): Promise<SessionResponse | null> => {
-    if (refreshPromise.current) return refreshPromise.current;
-    refreshPromise.current = (async () => {
-      try {
-        const session = await apiRequest<SessionResponse>('/auth/refresh', { method: 'POST' });
-        accessToken.current = session.accessToken;
-        setPrincipal({ organization: session.organization, user: session.user });
-        setStatus('authenticated');
-        if (refreshTimer.current) clearTimeout(refreshTimer.current);
-        refreshTimer.current = setTimeout(
-          () => {
-            accessToken.current = null;
-          },
-          Math.max(30, session.expiresInSeconds - 60) * 1_000,
-        );
-        return session;
-      } catch (error) {
+  const hydrate = useCallback(async (session: Session | null): Promise<void> => {
+    if (!session) {
+      accessToken.current = null;
+      setPrincipal(null);
+      setStatus('anonymous');
+      return;
+    }
+    accessToken.current = session.access_token;
+    try {
+      const nextPrincipal = await apiRequest<AuthPrincipal>(
+        '/auth/me',
+        undefined,
+        session.access_token,
+      );
+      setPrincipal(nextPrincipal);
+      setStatus('authenticated');
+    } catch (error) {
+      setPrincipal(null);
+      if (error instanceof ApiError && error.status === 401) {
         accessToken.current = null;
-        setPrincipal(null);
         setStatus('anonymous');
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
-          return null;
-        }
-        throw error;
+      } else if (error instanceof ApiError && error.status === 403) {
+        setStatus('forbidden');
+      } else {
+        // A control-plane outage must not masquerade as a signed-out user.
+        // AuthGate renders an explicit retry state without discarding the session.
+        setStatus('unavailable');
+      }
+    }
+  }, []);
+
+  const getSession = useCallback(async (refresh = false): Promise<Session | null> => {
+    if (sessionPromise.current) return sessionPromise.current;
+    sessionPromise.current = (async () => {
+      try {
+        const result = refresh
+          ? await createClient().auth.refreshSession()
+          : await createClient().auth.getSession();
+        if (result.error) return null;
+        return result.data.session;
       } finally {
-        refreshPromise.current = null;
+        sessionPromise.current = null;
       }
     })();
-    return refreshPromise.current;
+    return sessionPromise.current;
   }, []);
 
   useEffect(() => {
-    void refresh();
-    return () => {
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-    };
-  }, [refresh]);
+    const supabase = createClient();
+    void getSession().then(hydrate, () => setStatus('unavailable'));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Leave the auth callback synchronously; nested client calls can deadlock.
+      setTimeout(() => void hydrate(session), 0);
+    });
+    return () => data.subscription.unsubscribe();
+  }, [getSession, hydrate]);
 
   const request = useCallback(
     async <T,>(path: string, init?: RequestInit): Promise<T> => {
       if (!accessToken.current) {
-        const session = await refresh();
+        const session = await getSession();
         if (!session) throw new ApiError(401, 'Authentication is required.');
+        accessToken.current = session.access_token;
       }
       try {
         return await apiRequest<T>(path, init, accessToken.current ?? undefined);
       } catch (error) {
         if (!(error instanceof ApiError) || error.status !== 401) throw error;
-        const session = await refresh();
+        const session = await getSession(true);
         if (!session) throw error;
-        return apiRequest<T>(path, init, session.accessToken);
+        accessToken.current = session.access_token;
+        return apiRequest<T>(path, init, session.access_token);
       }
     },
-    [refresh],
+    [getSession],
+  );
+
+  const requestResult = useCallback(
+    async <T,>(path: string, init?: RequestInit): Promise<ApiResponse<T>> => {
+      if (!accessToken.current) {
+        const session = await getSession();
+        if (!session) throw new ApiError(401, 'Authentication is required.');
+        accessToken.current = session.access_token;
+      }
+      try {
+        return await apiRequestResult<T>(path, init, accessToken.current ?? undefined);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 401) throw error;
+        const session = await getSession(true);
+        if (!session) throw error;
+        accessToken.current = session.access_token;
+        return apiRequestResult<T>(path, init, session.access_token);
+      }
+    },
+    [getSession],
   );
 
   const logout = useCallback(async () => {
     try {
-      await apiRequest<void>('/auth/logout', { method: 'POST' });
+      await createClient().auth.signOut({ scope: 'local' });
+    } catch {
+      // Logout remains locally effective during an Auth outage. Supabase JWTs
+      // are short-lived; server-side refresh revocation is best-effort here.
     } finally {
       accessToken.current = null;
       setPrincipal(null);
       setStatus('anonymous');
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
     }
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ logout, principal, request, status }),
-    [logout, principal, request, status],
+    () => ({ logout, principal, request, requestResult, status }),
+    [logout, principal, request, requestResult, status],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

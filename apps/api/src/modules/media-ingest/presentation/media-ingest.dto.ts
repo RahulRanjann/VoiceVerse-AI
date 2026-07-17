@@ -17,6 +17,22 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+import {
+  OBJECT_STORAGE_UNAVAILABLE_CODE,
+  OBJECT_STORAGE_UNAVAILABLE_MESSAGE,
+} from '../domain/object-storage.error';
+
+export class ObjectStorageUnavailableResponseDto {
+  @ApiProperty({ example: 503 })
+  statusCode!: 503;
+
+  @ApiProperty({ example: OBJECT_STORAGE_UNAVAILABLE_CODE })
+  code!: typeof OBJECT_STORAGE_UNAVAILABLE_CODE;
+
+  @ApiProperty({ example: OBJECT_STORAGE_UNAVAILABLE_MESSAGE })
+  message!: typeof OBJECT_STORAGE_UNAVAILABLE_MESSAGE;
+}
+
 export class CreateMultipartUploadDto {
   @ApiProperty({ example: 'monsoon-letters-master.mp4' })
   @IsString()

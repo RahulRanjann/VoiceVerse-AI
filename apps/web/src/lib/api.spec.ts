@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError, apiRequest } from './api';
+import { ApiError, apiRequest, apiRequestResult } from './api';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,7 +26,7 @@ describe('apiRequest', () => {
 
     const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
     const headers = new Headers(request.headers);
-    expect(request.credentials).toBe('include');
+    expect(request.credentials).toBe('omit');
     expect(headers.get('authorization')).toBe('Bearer access-token');
     expect(headers.get('content-type')).toBe('application/json');
   });
@@ -34,7 +34,28 @@ describe('apiRequest', () => {
   it('handles empty success responses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
 
-    await expect(apiRequest<void>('/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
+    await expect(
+      apiRequest<void>('/projects/project-1', { method: 'DELETE' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('treats a conditional 304 response as an unchanged successful result', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(null, {
+          headers: { etag: 'W/"job-1-7"' },
+          status: 304,
+        }),
+      ),
+    );
+
+    await expect(apiRequestResult('/jobs/job-1')).resolves.toEqual({
+      data: null,
+      etag: 'W/"job-1-7"',
+      notModified: true,
+      status: 304,
+    });
   });
 
   it('normalizes string and array API errors', async () => {

@@ -1,6 +1,6 @@
 # ADR 0005: Browser authentication and session rotation
 
-- Status: Accepted
+- Status: Superseded by ADR 0008
 - Date: 2026-07-16
 
 ## Context

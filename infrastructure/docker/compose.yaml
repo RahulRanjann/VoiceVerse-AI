@@ -39,6 +39,7 @@ services:
     image: ${MINIO_IMAGE:-quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z}
     command: ['server', '/data', '--console-address', ':9001']
     environment:
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-http://localhost:3000,http://127.0.0.1:3000}
       MINIO_ROOT_USER: ${S3_ACCESS_KEY}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
     ports:
@@ -62,17 +63,15 @@ services:
     entrypoint: ['/bin/sh', '-c']
     command:
       - >-
-        until mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"; do sleep 1; done;
+        set -eu;
+        mc alias set local http://minio:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}";
         mc mb --ignore-existing "local/$${S3_BUCKET}";
-        mc cors set "local/$${S3_BUCKET}" /config/cors.xml;
         mc anonymous set none "local/$${S3_BUCKET}"
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_BUCKET: ${S3_BUCKET}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
     restart: 'no'
-    volumes:
-      - ../minio/cors.xml:/config/cors.xml:ro
     networks: [voiceverse]
 
   clamav:
@@ -93,8 +92,15 @@ services:
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
     environment:
       APP_VERSION: ${APP_VERSION:-development}
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
     ports:
       - '127.0.0.1:${WEB_PORT:-3000}:3000'
     healthcheck:
@@ -124,7 +130,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     environment:
-      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
       API_HOST: 0.0.0.0
       API_PORT: 3001
       APP_VERSION: ${APP_VERSION:-development}
@@ -149,8 +155,16 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_SSE_ALGORITHM: ${S3_SSE_ALGORITHM:-none}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_URL: ${SUPABASE_URL}
+      TRANSLATION_ENABLED: ${TRANSLATION_ENABLED:-false}
+      TRANSLATION_PROVIDER_NAME: ${TRANSLATION_PROVIDER_NAME:-activation-required}
+      TRANSLATION_MODEL_ID: ${TRANSLATION_MODEL_ID:-activation-required}
+      TRANSLATION_MODEL_REVISION: ${TRANSLATION_MODEL_REVISION:-activation-required}
+      TRANSLATION_RUNTIME_VERSION: ${TRANSLATION_RUNTIME_VERSION:-activation-required}
+      TRANSLATION_PROMPT_VERSION: ${TRANSLATION_PROMPT_VERSION:-activation-required}
       WEB_ORIGIN: http://localhost:${WEB_PORT:-3000}
-      WEB_AUTH_SUCCESS_URL: http://localhost:${WEB_PORT:-3000}
     ports:
       - '127.0.0.1:${API_PORT:-3001}:3001'
     healthcheck:
@@ -159,7 +173,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3001/health/live').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3001/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -177,6 +191,7 @@ services:
       dockerfile: apps/api/Dockerfile
     command: ['node', 'dist/worker.js']
     depends_on:
+      ai: { condition: service_healthy }
       clamav: { condition: service_healthy }
       minio: { condition: service_healthy }
       postgres: { condition: service_healthy }
@@ -192,6 +207,49 @@ services:
       DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-30000}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      MEDIA_SCAN_LEASE_SECONDS: ${MEDIA_SCAN_LEASE_SECONDS:-300}
+      MEDIA_EXECUTOR_BASE_URL: http://ai:8000
+      MEDIA_EXECUTOR_BEARER_TOKEN: ${AI_INTERNAL_BEARER_TOKEN}
+      MEDIA_EXECUTOR_TIMEOUT_MS: ${MEDIA_EXECUTOR_TIMEOUT_MS:-21600000}
+      MEDIA_PROCESSING_CONCURRENCY: ${MEDIA_PROCESSING_CONCURRENCY:-1}
+      SPEECH_ANALYSIS_ENABLED: ${SPEECH_ANALYSIS_ENABLED:-false}
+      VOCAL_SEPARATION_EXECUTOR_BASE_URL: http://ai:8000
+      TRANSCRIPTION_EXECUTOR_BASE_URL: http://ai:8000
+      DIARIZATION_EXECUTOR_BASE_URL: http://ai:8000
+      SPEECH_EXECUTOR_BEARER_TOKEN: ${AI_INTERNAL_BEARER_TOKEN}
+      VOCAL_SEPARATION_PROVIDER_NAME: ${VOCAL_SEPARATION_PROVIDER_NAME:-activation-required}
+      VOCAL_SEPARATION_MODEL_ID: ${VOCAL_SEPARATION_MODEL_ID:-activation-required}
+      VOCAL_SEPARATION_MODEL_REVISION: ${VOCAL_SEPARATION_MODEL_REVISION:-activation-required}
+      VOCAL_SEPARATION_RUNTIME_VERSION: ${VOCAL_SEPARATION_RUNTIME_VERSION:-activation-required}
+      TRANSCRIPTION_PROVIDER_NAME: ${TRANSCRIPTION_PROVIDER_NAME:-activation-required}
+      TRANSCRIPTION_MODEL_ID: ${TRANSCRIPTION_MODEL_ID:-activation-required}
+      TRANSCRIPTION_MODEL_REVISION: ${TRANSCRIPTION_MODEL_REVISION:-activation-required}
+      TRANSCRIPTION_RUNTIME_VERSION: ${TRANSCRIPTION_RUNTIME_VERSION:-activation-required}
+      DIARIZATION_PROVIDER_NAME: ${DIARIZATION_PROVIDER_NAME:-activation-required}
+      DIARIZATION_MODEL_ID: ${DIARIZATION_MODEL_ID:-activation-required}
+      DIARIZATION_MODEL_REVISION: ${DIARIZATION_MODEL_REVISION:-activation-required}
+      DIARIZATION_RUNTIME_VERSION: ${DIARIZATION_RUNTIME_VERSION:-activation-required}
+      VOCAL_SEPARATION_EXECUTOR_TIMEOUT_MS: ${VOCAL_SEPARATION_EXECUTOR_TIMEOUT_MS:-21600000}
+      TRANSCRIPTION_EXECUTOR_TIMEOUT_MS: ${TRANSCRIPTION_EXECUTOR_TIMEOUT_MS:-21600000}
+      DIARIZATION_EXECUTOR_TIMEOUT_MS: ${DIARIZATION_EXECUTOR_TIMEOUT_MS:-21600000}
+      VOCAL_SEPARATION_CONCURRENCY: ${VOCAL_SEPARATION_CONCURRENCY:-1}
+      TRANSCRIPTION_CONCURRENCY: ${TRANSCRIPTION_CONCURRENCY:-1}
+      DIARIZATION_CONCURRENCY: ${DIARIZATION_CONCURRENCY:-1}
+      CHARACTER_IDENTIFICATION_CONCURRENCY: ${CHARACTER_IDENTIFICATION_CONCURRENCY:-2}
+      SPEECH_MANIFEST_MAX_BYTES: ${SPEECH_MANIFEST_MAX_BYTES:-67108864}
+      SPEECH_MANIFEST_MEMORY_BUDGET_BYTES: ${SPEECH_MANIFEST_MEMORY_BUDGET_BYTES:-67108864}
+      SPEECH_COMPLETION_TRANSACTION_TIMEOUT_MS: ${SPEECH_COMPLETION_TRANSACTION_TIMEOUT_MS:-300000}
+      TRANSLATION_ENABLED: ${TRANSLATION_ENABLED:-false}
+      TRANSLATION_EXECUTOR_BASE_URL: http://ai:8000
+      TRANSLATION_EXECUTOR_BEARER_TOKEN: ${AI_INTERNAL_BEARER_TOKEN}
+      TRANSLATION_EXECUTOR_TIMEOUT_MS: ${TRANSLATION_EXECUTOR_TIMEOUT_MS:-300000}
+      TRANSLATION_PROVIDER_NAME: ${TRANSLATION_PROVIDER_NAME:-activation-required}
+      TRANSLATION_MODEL_ID: ${TRANSLATION_MODEL_ID:-activation-required}
+      TRANSLATION_MODEL_REVISION: ${TRANSLATION_MODEL_REVISION:-activation-required}
+      TRANSLATION_RUNTIME_VERSION: ${TRANSLATION_RUNTIME_VERSION:-activation-required}
+      TRANSLATION_PROMPT_VERSION: ${TRANSLATION_PROMPT_VERSION:-activation-required}
+      TRANSLATION_CONCURRENCY: ${TRANSLATION_CONCURRENCY:-2}
+      TRANSLATION_GENERATION_LEASE_SECONDS: ${TRANSLATION_GENERATION_LEASE_SECONDS:-300}
       NODE_ENV: ${NODE_ENV:-development}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAME: voiceverse-worker
@@ -206,8 +264,11 @@ services:
       S3_REGION: ${S3_REGION:-us-east-1}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_SSE_ALGORITHM: ${S3_SSE_ALGORITHM:-none}
-      WEB_AUTH_SUCCESS_URL: http://localhost:${WEB_PORT:-3000}
+      SUPABASE_JWKS_URL: ${SUPABASE_JWKS_URL}
+      SUPABASE_JWT_AUDIENCE: ${SUPABASE_JWT_AUDIENCE:-authenticated}
+      SUPABASE_URL: ${SUPABASE_URL}
       WEB_ORIGIN: http://localhost:${WEB_PORT:-3000}
+      WORKFLOW_ATTEMPT_LEASE_SECONDS: ${WORKFLOW_ATTEMPT_LEASE_SECONDS:-300}
       WORKER_HOST: 0.0.0.0
       WORKER_PORT: 3002
     healthcheck:
@@ -216,7 +277,7 @@ services:
           'CMD',
           'node',
           '-e',
-          "fetch('http://127.0.0.1:3002/health/live').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:3002/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 10s
       timeout: 3s
@@ -232,7 +293,40 @@ services:
     build:
       context: ../..
       dockerfile: services/ai/Dockerfile
+    depends_on:
+      minio-init: { condition: service_completed_successfully }
     environment:
+      AI_INTERNAL_BEARER_TOKEN: ${AI_INTERNAL_BEARER_TOKEN}
+      AI_MEDIA_FFMPEG_THREADS: ${AI_MEDIA_FFMPEG_THREADS:-4}
+      AI_MEDIA_MAX_DURATION_SECONDS: ${AI_MEDIA_MAX_DURATION_SECONDS:-21600}
+      AI_MEDIA_MAX_INPUT_BYTES: ${AI_MEDIA_MAX_INPUT_BYTES:-21474836480}
+      AI_MEDIA_MAX_OUTPUT_BYTES: ${AI_MEDIA_MAX_OUTPUT_BYTES:-21474836480}
+      AI_MEDIA_PROBE_TIMEOUT_SECONDS: ${AI_MEDIA_PROBE_TIMEOUT_SECONDS:-60}
+      AI_MEDIA_SCRATCH_ROOT: /var/lib/voiceverse-media
+      AI_MEDIA_SUBPROCESS_OUTPUT_LIMIT_BYTES: ${AI_MEDIA_SUBPROCESS_OUTPUT_LIMIT_BYTES:-131072}
+      AI_MEDIA_TRANSCODE_TIMEOUT_SECONDS: ${AI_MEDIA_TRANSCODE_TIMEOUT_SECONDS:-7200}
+      AI_SPEECH_VOCAL_SEPARATION_ENABLED: ${AI_SPEECH_VOCAL_SEPARATION_ENABLED:-false}
+      AI_SPEECH_TRANSCRIPTION_ENABLED: ${AI_SPEECH_TRANSCRIPTION_ENABLED:-false}
+      AI_SPEECH_DIARIZATION_ENABLED: ${AI_SPEECH_DIARIZATION_ENABLED:-false}
+      AI_SPEECH_SCRATCH_ROOT: /var/lib/voiceverse-speech
+      AI_SPEECH_MAX_INPUT_BYTES: ${AI_SPEECH_MAX_INPUT_BYTES:-21474836480}
+      AI_SPEECH_MAX_OUTPUT_BYTES: ${AI_SPEECH_MAX_OUTPUT_BYTES:-21474836480}
+      AI_SPEECH_MAX_MANIFEST_BYTES: ${AI_SPEECH_MAX_MANIFEST_BYTES:-67108864}
+      AI_SPEECH_MAX_REQUEST_BODY_BYTES: ${AI_SPEECH_MAX_REQUEST_BODY_BYTES:-65536}
+      AI_SPEECH_MAX_DURATION_SECONDS: ${AI_SPEECH_MAX_DURATION_SECONDS:-21600}
+      AI_SPEECH_MAX_CONCURRENCY: ${AI_SPEECH_MAX_CONCURRENCY:-1}
+      AI_SPEECH_VOCAL_SEPARATION_TIMEOUT_SECONDS: ${AI_SPEECH_VOCAL_SEPARATION_TIMEOUT_SECONDS:-21000}
+      AI_SPEECH_TRANSCRIPTION_TIMEOUT_SECONDS: ${AI_SPEECH_TRANSCRIPTION_TIMEOUT_SECONDS:-21000}
+      AI_SPEECH_DIARIZATION_TIMEOUT_SECONDS: ${AI_SPEECH_DIARIZATION_TIMEOUT_SECONDS:-21000}
+      AI_SPEECH_TIMELINE_TOLERANCE_US: ${AI_SPEECH_TIMELINE_TOLERANCE_US:-50000}
+      AI_TRANSLATION_ENABLED: ${AI_TRANSLATION_ENABLED:-false}
+      AI_TRANSLATION_PROVIDER: ${AI_TRANSLATION_PROVIDER:-none}
+      AI_TRANSLATION_MODEL_ID: ${AI_TRANSLATION_MODEL_ID:-voiceverse/deterministic-translation}
+      AI_TRANSLATION_MODEL_REVISION: ${AI_TRANSLATION_MODEL_REVISION:-test-v1}
+      AI_TRANSLATION_RUNTIME_VERSION: ${AI_TRANSLATION_RUNTIME_VERSION:-1.0.0}
+      AI_TRANSLATION_MAX_REQUEST_BODY_BYTES: ${AI_TRANSLATION_MAX_REQUEST_BODY_BYTES:-1048576}
+      AI_TRANSLATION_PROVIDER_TIMEOUT_SECONDS: ${AI_TRANSLATION_PROVIDER_TIMEOUT_SECONDS:-120}
+      AI_TRANSLATION_MAX_CONCURRENCY: ${AI_TRANSLATION_MAX_CONCURRENCY:-4}
       AI_HOST: 0.0.0.0
       AI_PORT: 8000
       APP_VERSION: ${APP_VERSION:-development}
@@ -241,6 +335,14 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_SERVICE_NAMESPACE: ${OTEL_SERVICE_NAMESPACE:-voiceverse}
       OTEL_TRACES_EXPORTER: ${OTEL_TRACES_EXPORTER:-none}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ENDPOINT: http://minio:9000
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      S3_KMS_KEY_ID: ${S3_KMS_KEY_ID:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_SSE_ALGORITHM: ${S3_SSE_ALGORITHM:-none}
     ports:
       - '127.0.0.1:${AI_PORT:-8000}:8000'
     healthcheck:
@@ -249,15 +351,21 @@ services:
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=2)",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)",
         ]
       interval: 10s
       timeout: 3s
       retries: 5
       start_period: 10s
+    cap_drop: [ALL]
+    pids_limit: 256
     read_only: true
     restart: unless-stopped
-    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw, noexec, nosuid, size=64m]
+    volumes:
+      - ai_media_scratch:/var/lib/voiceverse-media
+      - ai_speech_scratch:/var/lib/voiceverse-speech
     networks: [voiceverse]
 
   otel-collector:
@@ -326,6 +434,8 @@ networks:
     name: voiceverse
 
 volumes:
+  ai_media_scratch:
+  ai_speech_scratch:
   clamav_data:
   grafana_data:
   loki_data:

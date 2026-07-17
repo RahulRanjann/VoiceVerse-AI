@@ -21,7 +21,13 @@ ENV PATH=/app/.venv/bin:${PATH}
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 
-RUN groupadd --system --gid 10001 voiceverse && useradd --system --uid 10001 --gid voiceverse voiceverse
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 voiceverse \
+    && useradd --system --uid 10001 --gid voiceverse voiceverse \
+    && install -d -o voiceverse -g voiceverse -m 0700 /var/lib/voiceverse-media \
+    && install -d -o voiceverse -g voiceverse -m 0700 /var/lib/voiceverse-speech
 COPY --from=build --chown=voiceverse:voiceverse /app/.venv ./.venv
 
 USER voiceverse

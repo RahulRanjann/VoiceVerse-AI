@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
 const baseURL = externalBaseUrl ?? 'http://127.0.0.1:3000';
+const e2eSupabaseUrl = process.env.E2E_SUPABASE_URL ?? 'http://127.0.0.1:54321';
 
 export default defineConfig({
   testDir: './e2e',
@@ -20,7 +21,15 @@ export default defineConfig({
   webServer: externalBaseUrl
     ? undefined
     : {
-        command: 'pnpm exec next dev --hostname 127.0.0.1 --port 3000',
+        // Webpack is intentionally used for browser tests. Turbopack's worker pool
+        // can consume excessive temporary disk space on constrained CI runners.
+        command: 'pnpm exec next dev --webpack --hostname 127.0.0.1 --port 3000',
+        env: {
+          ...process.env,
+          NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:3001/v1',
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'voiceverse_e2e_publishable_key',
+          NEXT_PUBLIC_SUPABASE_URL: e2eSupabaseUrl,
+        },
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

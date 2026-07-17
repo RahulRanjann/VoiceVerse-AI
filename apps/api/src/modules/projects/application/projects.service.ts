@@ -125,6 +125,29 @@ export class ProjectsService {
         },
         take: 1,
       },
+      workflowJobs: {
+        orderBy: { createdAt: 'desc' as const },
+        select: {
+          completedAt: true,
+          failureCode: true,
+          id: true,
+          kind: true,
+          pipelineVersion: true,
+          revision: true,
+          stages: {
+            orderBy: { ordinal: 'asc' as const },
+            select: {
+              progressBasisPoints: true,
+              status: true,
+              weightBasisPoints: true,
+            },
+          },
+          startedAt: true,
+          status: true,
+          updatedAt: true,
+        },
+        take: 1,
+      },
     } as const;
   }
 
@@ -139,11 +162,53 @@ export class ProjectsService {
       language: { id: string; bcp47Tag: string; englishName: string };
     }>;
     videos: Array<{ id: string; ingestStatus: string; securityStatus: string }>;
+    workflowJobs: Array<{
+      completedAt: Date | null;
+      failureCode: string | null;
+      id: string;
+      kind: string;
+      pipelineVersion: string;
+      revision: number;
+      stages: Array<{
+        progressBasisPoints: number;
+        status: string;
+        weightBasisPoints: number;
+      }>;
+      startedAt: Date | null;
+      status: string;
+      updatedAt: Date;
+    }>;
   }) {
+    const latestJob = project.workflowJobs[0];
+    const totalWeight = latestJob?.stages.reduce(
+      (total, stage) => total + stage.weightBasisPoints,
+      0,
+    );
+    const weightedProgress = latestJob?.stages.reduce(
+      (total, stage) => total + stage.weightBasisPoints * stage.progressBasisPoints,
+      0,
+    );
     return {
       createdAt: project.createdAt.toISOString(),
       id: project.id,
       latestVideo: project.videos[0] ?? null,
+      latestJob: latestJob
+        ? {
+            completedAt: latestJob.completedAt?.toISOString() ?? null,
+            failureCode: latestJob.failureCode,
+            id: latestJob.id,
+            kind: latestJob.kind,
+            pipelineVersion: latestJob.pipelineVersion,
+            progressBasisPoints:
+              totalWeight && weightedProgress != null
+                ? Math.round(weightedProgress / totalWeight)
+                : 0,
+            revision: latestJob.revision,
+            startedAt: latestJob.startedAt?.toISOString() ?? null,
+            status: latestJob.status,
+            updatedAt: latestJob.updatedAt.toISOString(),
+          }
+        : null,
       name: project.name,
       sourceLanguage: project.sourceLanguage,
       status: project.status,

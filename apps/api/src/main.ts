@@ -6,7 +6,6 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import compress from '@fastify/compress';
-import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import { Logger } from 'nestjs-pino';
 
@@ -32,10 +31,8 @@ async function bootstrap(): Promise<void> {
     contentSecurityPolicy: false,
   });
   await app.register(compress, { encodings: ['gzip', 'deflate'] });
-  await app.register(cookie);
 
   app.enableCors({
-    credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     origin: [config.get('WEB_ORIGIN', { infer: true })],
   });

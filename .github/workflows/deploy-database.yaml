@@ -1,5 +1,7 @@
 name: Deploy database migrations
 
+run-name: Migrate ${{ inputs.environment }} at ${{ inputs.release_sha }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +12,10 @@ on:
         options:
           - staging
           - production
+      release_sha:
+        description: Exact 40-character commit SHA selected from the main branch
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,8 +25,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize-release:
+    name: Authorize immutable main release
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the selected main commit
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'release_sha must be an exact lowercase 40-character commit SHA.' >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != 'refs/heads/main' || "$GITHUB_SHA" != "$RELEASE_SHA" ]]; then
+            echo 'Database migrations may only deploy the exact commit selected from main.' >&2
+            exit 1
+          fi
+
   migrate:
     name: Migrate ${{ inputs.environment }}
+    needs: authorize-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: ${{ inputs.environment }}
@@ -31,6 +56,12 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          ref: ${{ inputs.release_sha }}
+
+      - name: Verify checked-out release identity
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
 
       - name: Install pnpm
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
@@ -52,3 +83,15 @@ jobs:
 
       - name: Deploy forward migrations
         run: pnpm db:migrate:deploy
+
+      - name: Verify migration status
+        run: pnpm --filter @voiceverse/database migrate:status
+
+      - name: Reject schema drift
+        run: pnpm --filter @voiceverse/database migrate:diff
+
+      - name: Verify Supabase Data API isolation
+        run: >-
+          psql "$DIRECT_URL"
+          --set ON_ERROR_STOP=1
+          --file infrastructure/supabase/verify-data-api-isolation.sql

@@ -9,7 +9,13 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiHeader, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiHeader,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 
 import type { AccessContext } from '../../identity/domain/access-context';
 import { AccessTokenGuard } from '../../identity/presentation/access-token.guard';
@@ -18,6 +24,7 @@ import { MediaIngestService } from '../application/media-ingest.service';
 import {
   CompleteMultipartUploadDto,
   CreateMultipartUploadDto,
+  ObjectStorageUnavailableResponseDto,
   SignPartsDto,
 } from './media-ingest.dto';
 
@@ -31,6 +38,10 @@ export class MediaIngestController {
   @Post('projects/:projectId/videos/multipart-uploads')
   @ApiHeader({ name: 'Idempotency-Key', required: true })
   @ApiOperation({ summary: 'Create a resumable direct-to-S3 MP4 upload.' })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable.',
+    type: ObjectStorageUnavailableResponseDto,
+  })
   create(
     @CurrentAuth() context: AccessContext,
     @Param('projectId') projectId: string,
@@ -52,6 +63,10 @@ export class MediaIngestController {
 
   @Post('multipart-uploads/:uploadId/complete')
   @ApiOperation({ summary: 'Complete an upload and move the source into quarantine.' })
+  @ApiServiceUnavailableResponse({
+    description: 'Object storage is temporarily unavailable.',
+    type: ObjectStorageUnavailableResponseDto,
+  })
   complete(
     @CurrentAuth() context: AccessContext,
     @Param('uploadId') uploadId: string,

@@ -5,7 +5,9 @@
 ```mermaid
 flowchart LR
     Browser --> Web[Next.js on Vercel]
-    Web --> API[NestJS API on container runtime]
+    Browser <-->|OAuth and session renewal| Auth[Supabase Auth]
+    Browser -->|Verified bearer token| API[NestJS API on container runtime]
+    API -.->|JWKS retrieval and cache| Auth
     API --> DB[(Supabase PostgreSQL)]
     API --> Redis[(Managed Redis)]
     API --> S3[Private S3]
@@ -16,8 +18,10 @@ flowchart LR
     Redis --> AI[Python CPU and GPU workers]
 ```
 
-Vercel hosts only the web tier. Supabase supplies PostgreSQL only. Do not add a Supabase
-publishable, secret, or service-role key to the browser project.
+Vercel hosts only the web tier. Supabase supplies Auth and PostgreSQL. The Supabase Data
+API remains disabled: browser database access is not part of the VoiceVerse trust model.
+The publishable key is expected in the browser bundle; secret and service-role keys are
+forbidden in the web project and are not needed by the normal API request path.
 
 ## 1. Create the Supabase environments
 
@@ -29,9 +33,12 @@ Mandatory project settings:
 
 1. Disable the Data API under **Project Settings → Data API**.
 2. Keep automatic table exposure disabled.
-3. Enable point-in-time recovery for production and verify restore procedures.
-4. Enable network restrictions when the selected plan and API egress design permit it.
-5. Configure database alerts for connection saturation, CPU, disk, and replication lag.
+3. Use an asymmetric Auth signing key and verify that the project's public JWKS endpoint
+   returns the active key before deploying the API.
+4. Disable anonymous sign-ins unless a future ADR explicitly introduces guest accounts.
+5. Enable point-in-time recovery for production and verify restore procedures.
+6. Enable network restrictions when the selected plan and API egress design permit it.
+7. Configure database alerts for connection saturation, CPU, disk, and replication lag.
 
 VoiceVerse accesses Supabase over PostgreSQL from trusted services. Supabase explicitly
 recommends disabling its Data API when an application only uses direct database
@@ -103,8 +110,11 @@ metrics. Supabase documents direct, session-pooler, and transaction-pooler selec
 ## 4. Deploy and verify migrations
 
 Create protected GitHub environments named `staging` and `production`. Add the secret
-`SUPABASE_MIGRATION_URL` to each environment and require approval for production. Run
-the **Deploy database migrations** workflow manually.
+`SUPABASE_MIGRATION_URL` to each environment, restrict deployments to `main`, and require
+approval for production. Run the **Deploy database migrations** workflow from `main` and
+supply its exact lowercase 40-character commit SHA. The workflow checks out that immutable
+revision and rejects a branch, tag, abbreviated SHA, or mismatched commit before accessing
+the protected migration environment.
 
 After migration, execute:
 
@@ -113,8 +123,10 @@ psql "$DIRECT_URL" --set ON_ERROR_STOP=1 \
   --file infrastructure/supabase/verify-data-api-isolation.sql
 ```
 
-The query must return zero rows. Also confirm the Data API remains disabled in the
-Supabase dashboard. A SQL grant check cannot verify the dashboard switch.
+The verification must exit successfully; it raises an error if any Data API role has an
+effective privilege on a public relation or sequence. Also confirm the Data API remains
+disabled in the Supabase dashboard. A SQL privilege check cannot verify the dashboard
+switch.
 
 ## 5. Create the Vercel project
 
@@ -130,15 +142,19 @@ Import the repository into Vercel and configure:
 Vercel's monorepo deployment model expects a project root for each deployed application;
 see [Using Monorepos](https://vercel.com/docs/monorepos).
 
-Set this non-secret variable separately for preview and production:
+Set these non-secret variables separately for preview and production:
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=https://api.voiceverse.ai/v1
+NEXT_PUBLIC_SUPABASE_URL=https://PROJECT_REF.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_ME
 ```
 
 `NEXT_PUBLIC_*` values are embedded at build time. Changing them requires a new Vercel
-deployment. Never configure `DATABASE_URL`, `DIRECT_URL`, S3 credentials, JWT private
-keys, Google client secrets, or Redis credentials in the web project.
+deployment. The build fails when a required value is absent, points at localhost, or a
+Supabase secret key is detected. Never configure `DATABASE_URL`, `DIRECT_URL`, S3
+credentials, Supabase secret/service-role keys, Google client secrets, or Redis
+credentials in the web project.
 
 ## 6. Domains and authentication
 
@@ -153,14 +169,34 @@ Configure the API environment with:
 
 ```dotenv
 WEB_ORIGIN=https://app.voiceverse.ai
-WEB_AUTH_SUCCESS_URL=https://app.voiceverse.ai
-GOOGLE_REDIRECT_URI=https://api.voiceverse.ai/v1/auth/google/callback
-AUTH_COOKIE_SECURE=true
+SUPABASE_URL=https://PROJECT_REF.supabase.co
+SUPABASE_JWKS_URL=https://PROJECT_REF.supabase.co/auth/v1/.well-known/jwks.json
+SUPABASE_JWT_AUDIENCE=authenticated
 ```
 
-Register the exact callback URI in Google Cloud. Each preview environment needs an exact,
-isolated API origin and callback configuration; do not allow wildcard origins on
-credentialed cookie endpoints.
+Do not add `SUPABASE_SECRET_KEY` to the API just to verify users. NestJS verifies access
+tokens offline against the public JWKS and continues to own internal users,
+organizations, roles, billing identifiers, and audit records.
+
+Configure authentication in this order:
+
+1. In Google Cloud, create a Web OAuth client and register the Supabase callback URI:
+   `https://PROJECT_REF.supabase.co/auth/v1/callback`.
+2. In **Supabase → Authentication → Providers → Google**, enable Google and store that
+   client ID and secret. The secret belongs in Supabase, not Vercel or source control.
+3. In **Supabase → Authentication → URL Configuration**, set the production site URL to
+   `https://app.voiceverse.ai` and allow
+   `https://app.voiceverse.ai/auth/callback` as a redirect URL.
+4. Allow `http://localhost:3000/auth/callback` only in the development project. Use
+   stable branch domains with explicit callback URLs for staging. Avoid a broad Vercel
+   preview wildcard for production identity.
+5. Set short access-token expiry appropriate for the product's risk profile and confirm
+   anonymous sign-in is disabled.
+
+The Next.js callback exchanges the OAuth code for a cookie-backed Supabase session. The
+browser then sends the short-lived access token to NestJS. NestJS fails closed unless the
+token has the expected issuer, audience, authenticated role, Google provider, session
+identifier, and an active VoiceVerse organization membership.
 
 ## 7. Release and rollback gates
 
@@ -168,10 +204,14 @@ Before production promotion:
 
 1. Run repository verification and Playwright acceptance tests.
 2. Deploy backward-compatible database migrations.
-3. Deploy API and worker containers; verify readiness and scan-queue health.
-4. Promote the tested Vercel deployment.
-5. Run sign-in, project creation, direct upload, quarantine, and clean-verdict smoke tests.
+3. Verify the Supabase JWKS endpoint and complete an isolated staging Google sign-in.
+4. For this pre-launch cutover, deploy the API and Vercel artifacts in one release window;
+   the retired custom-session endpoints are intentionally not a long-term compatibility
+   surface. A live-user migration must first ship a temporary dual-acceptance API.
+5. Verify API readiness and scan-queue health, then run sign-in, refresh, logout, project
+   creation, direct upload, quarantine, and clean-verdict smoke tests.
 
 Use expand/contract database migrations. A Vercel instant rollback only rolls back the
 web artifact; database and API compatibility must span at least one web release in each
-direction.
+direction. Keep the legacy OAuth/session tables for the documented rollback window, but
+do not treat them as active credentials after the Supabase cutover.

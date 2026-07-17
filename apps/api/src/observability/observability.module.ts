@@ -6,6 +6,7 @@ import { TelemetryService } from './telemetry.service';
 
 @Module({
   controllers: [MetricsController],
+  exports: [MetricsService],
   providers: [MetricsService, TelemetryService],
 })
 export class ObservabilityModule {}

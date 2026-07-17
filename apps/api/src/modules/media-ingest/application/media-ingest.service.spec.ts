@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -18,6 +19,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Environment } from '../../../config/environment';
 import type { DatabaseService } from '../../../infrastructure/database/database.service';
 import type { AccessContext } from '../../identity/domain/access-context';
+import {
+  OBJECT_STORAGE_UNAVAILABLE_CODE,
+  OBJECT_STORAGE_UNAVAILABLE_MESSAGE,
+  ObjectStorageUnavailableError,
+} from '../domain/object-storage.error';
 import { MediaIngestService } from './media-ingest.service';
 
 const mebibytes = 1_048_576;
@@ -127,7 +133,9 @@ function createHarness(overrides: Partial<Record<keyof Environment, unknown>> = 
       update: vi.fn().mockResolvedValue({}),
     },
     project: {
-      findFirst: vi.fn().mockResolvedValue({ id: projectId, status: ProjectStatus.DRAFT }),
+      findFirst: vi
+        .fn()
+        .mockResolvedValue({ id: projectId, status: ProjectStatus.DRAFT, videos: [] }),
       update: vi.fn().mockResolvedValue({}),
     },
     video: { update: vi.fn().mockResolvedValue({}) },
@@ -139,6 +147,7 @@ function createHarness(overrides: Partial<Record<keyof Environment, unknown>> = 
     getObjectStream: vi.fn(),
     headObject: vi.fn().mockResolvedValue({ byteSize: totalBytes, etag: 'head-etag' }),
     ping: vi.fn().mockResolvedValue(undefined),
+    putImmutableObject: vi.fn().mockResolvedValue(undefined),
     signUploadPart: vi
       .fn()
       .mockImplementation((input: { partNumber: number }) =>
@@ -261,10 +270,70 @@ describe('MediaIngestService', () => {
     archived.client.project.findFirst.mockResolvedValue({
       id: projectId,
       status: ProjectStatus.ARCHIVED,
+      videos: [],
     });
     await expect(
       archived.service.create(context, projectId, 'upload-key-0001', createInput),
     ).rejects.toThrow(/Archived projects/);
+  });
+
+  it('enforces one immutable source video per project before creating storage state', async () => {
+    const harness = createHarness();
+    harness.client.project.findFirst.mockResolvedValue({
+      id: projectId,
+      status: ProjectStatus.INGESTING,
+      videos: [{ id: videoId }],
+    });
+
+    await expect(
+      harness.service.create(context, projectId, 'upload-key-0002', createInput),
+    ).rejects.toThrow(/already has a source video/);
+
+    expect(harness.storage.createMultipartUpload).not.toHaveBeenCalled();
+  });
+
+  it('returns a sanitized retryable response when storage cannot create the upload', async () => {
+    const harness = createHarness();
+    const sensitiveCause =
+      'connect ECONNREFUSED http://private-storage.internal/tenant/source/original.mp4';
+    harness.storage.createMultipartUpload.mockRejectedValue(
+      new ObjectStorageUnavailableError(
+        'create-multipart-upload',
+        new AggregateError([new Error(sensitiveCause)], sensitiveCause),
+      ),
+    );
+    const warning = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    const caught = await harness.service
+      .create(context, projectId, 'upload-key-0001', createInput)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    expect(caught).toBeInstanceOf(ServiceUnavailableException);
+    if (!(caught instanceof ServiceUnavailableException)) {
+      throw new Error('Expected a service unavailable exception.');
+    }
+    expect(caught.getStatus()).toBe(503);
+    expect(caught.getResponse()).toEqual({
+      code: OBJECT_STORAGE_UNAVAILABLE_CODE,
+      message: OBJECT_STORAGE_UNAVAILABLE_MESSAGE,
+      statusCode: 503,
+    });
+    expect(JSON.stringify(caught.getResponse())).not.toContain(sensitiveCause);
+    expect(harness.client.$transaction).not.toHaveBeenCalled();
+    expect(harness.storage.abortMultipartUpload).not.toHaveBeenCalled();
+    expect(warning).toHaveBeenCalledWith(
+      {
+        dependency: 'object-storage',
+        errorCode: OBJECT_STORAGE_UNAVAILABLE_CODE,
+        errorName: 'AggregateError',
+        operation: 'create-multipart-upload',
+      },
+      'Object storage operation unavailable',
+    );
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(sensitiveCause);
   });
 
   it('aborts the provider upload when the database transaction loses', async () => {

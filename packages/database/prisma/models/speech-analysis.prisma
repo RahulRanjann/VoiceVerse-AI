@@ -1,0 +1,322 @@
+enum CharacterOrigin {
+  DETECTED     @map("detected")
+  USER_CREATED @map("user_created")
+
+  @@map("character_origin")
+}
+
+enum CharacterStatus {
+  ACTIVE   @map("active")
+  MERGED   @map("merged")
+  ARCHIVED @map("archived")
+
+  @@map("character_status")
+}
+
+model SpeechAnalysis {
+  id               String   @id @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  sourceVideoId    String   @map("source_video_id") @db.Uuid
+  workflowJobId    String   @unique(map: "speech_analyses_workflow_job_key") @map("workflow_job_id") @db.Uuid
+  sourceLanguageId String   @map("source_language_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization               Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project                    Project                         @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  sourceVideo                Video                           @relation(fields: [sourceVideoId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  workflowJob                WorkflowJob                     @relation(fields: [workflowJobId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  sourceLanguage             Language                        @relation(fields: [sourceLanguageId], references: [id], onDelete: Restrict)
+  transcriptionRun           TranscriptionRun?
+  diarizationRun             DiarizationRun?
+  characterIdentificationRun CharacterIdentificationRun?
+  projectSelection           ProjectSpeechAnalysisSelection?
+  localizationWorkspace      LocalizationWorkspace?
+
+  @@unique([id, organizationId, projectId], map: "speech_analyses_id_tenant_project_key")
+  @@unique([id, organizationId, projectId, sourceVideoId], map: "speech_analyses_id_tenant_source_key")
+  @@unique([workflowJobId, organizationId, projectId, sourceVideoId], map: "speech_analyses_job_tenant_source_key")
+  @@index([organizationId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "speech_analyses_org_project_created_idx")
+  @@index([projectId, organizationId], map: "speech_analyses_project_tenant_idx")
+  @@index([sourceVideoId], map: "speech_analyses_source_video_id_idx")
+  @@index([sourceLanguageId], map: "speech_analyses_source_language_id_idx")
+  @@map("speech_analyses")
+}
+
+model TranscriptionRun {
+  id                 String   @id @db.Uuid
+  speechAnalysisId   String   @unique(map: "transcription_runs_analysis_key") @map("speech_analysis_id") @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  sourceVideoId      String   @map("source_video_id") @db.Uuid
+  producerAttemptId  String   @unique(map: "transcription_runs_producer_attempt_key") @map("producer_attempt_id") @db.Uuid
+  inputArtifactId    String   @map("input_artifact_id") @db.Uuid
+  manifestArtifactId String   @unique(map: "transcription_runs_manifest_artifact_key") @map("manifest_artifact_id") @db.Uuid
+  sourceLanguageId   String   @map("source_language_id") @db.Uuid
+  contractVersion    Int      @map("contract_version")
+  providerName       String   @map("provider_name") @db.VarChar(100)
+  modelName          String   @map("model_name") @db.VarChar(160)
+  modelRevision      String   @map("model_revision") @db.VarChar(160)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  speechAnalysis              SpeechAnalysis               @relation(fields: [speechAnalysisId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Cascade)
+  producerAttempt             WorkflowStageAttempt         @relation(fields: [producerAttemptId], references: [id], onDelete: Restrict)
+  inputArtifact               MediaArtifact                @relation("TranscriptionInputArtifact", fields: [inputArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  manifestArtifact            MediaArtifact                @relation("TranscriptionManifestArtifact", fields: [manifestArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  sourceLanguage              Language                     @relation(fields: [sourceLanguageId], references: [id], onDelete: Restrict)
+  segments                    TranscriptSegment[]
+  characterIdentificationRuns CharacterIdentificationRun[]
+
+  @@unique([id, speechAnalysisId], map: "transcription_runs_id_analysis_key")
+  @@unique([speechAnalysisId, organizationId, projectId, sourceVideoId], map: "transcription_runs_analysis_tenant_source_key")
+  @@index([inputArtifactId], map: "transcription_runs_input_artifact_id_idx")
+  @@index([sourceLanguageId], map: "transcription_runs_source_language_id_idx")
+  @@map("transcription_runs")
+}
+
+model TranscriptSegment {
+  id                             String   @id @db.Uuid
+  transcriptionRunId             String   @map("transcription_run_id") @db.Uuid
+  sequenceNumber                 Int      @map("sequence_number")
+  startTimeUs                    BigInt   @map("start_time_us")
+  endTimeUs                      BigInt   @map("end_time_us")
+  text                           String   @db.Text
+  languageTag                    String?  @map("language_tag") @db.VarChar(35)
+  confidenceBasisPoints          Int?     @map("confidence_basis_points")
+  noSpeechProbabilityBasisPoints Int?     @map("no_speech_probability_basis_points")
+  createdAt                      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  transcriptionRun TranscriptionRun  @relation(fields: [transcriptionRunId], references: [id], onDelete: Cascade)
+  words            TranscriptWord[]
+  dialogueSegments DialogueSegment[]
+
+  @@unique([transcriptionRunId, sequenceNumber], map: "transcript_segments_run_sequence_key")
+  @@unique([id, transcriptionRunId], map: "transcript_segments_id_run_key")
+  @@index([transcriptionRunId, startTimeUs, id], map: "transcript_segments_run_start_idx")
+  @@map("transcript_segments")
+}
+
+model TranscriptWord {
+  id                    String   @id @db.Uuid
+  transcriptionRunId    String   @map("transcription_run_id") @db.Uuid
+  transcriptSegmentId   String   @map("transcript_segment_id") @db.Uuid
+  sequenceNumber        Int      @map("sequence_number")
+  startTimeUs           BigInt   @map("start_time_us")
+  endTimeUs             BigInt   @map("end_time_us")
+  text                  String   @db.Text
+  confidenceBasisPoints Int?     @map("confidence_basis_points")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  transcriptSegment TranscriptSegment @relation(fields: [transcriptSegmentId, transcriptionRunId], references: [id, transcriptionRunId], onDelete: Cascade)
+
+  @@unique([transcriptSegmentId, sequenceNumber], map: "transcript_words_segment_sequence_key")
+  @@index([transcriptionRunId, startTimeUs, id], map: "transcript_words_run_start_idx")
+  @@map("transcript_words")
+}
+
+model DiarizationRun {
+  id                 String   @id @db.Uuid
+  speechAnalysisId   String   @unique(map: "diarization_runs_analysis_key") @map("speech_analysis_id") @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  sourceVideoId      String   @map("source_video_id") @db.Uuid
+  producerAttemptId  String   @unique(map: "diarization_runs_producer_attempt_key") @map("producer_attempt_id") @db.Uuid
+  inputArtifactId    String   @map("input_artifact_id") @db.Uuid
+  manifestArtifactId String   @unique(map: "diarization_runs_manifest_artifact_key") @map("manifest_artifact_id") @db.Uuid
+  contractVersion    Int      @map("contract_version")
+  providerName       String   @map("provider_name") @db.VarChar(100)
+  modelName          String   @map("model_name") @db.VarChar(160)
+  modelRevision      String   @map("model_revision") @db.VarChar(160)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  speechAnalysis              SpeechAnalysis               @relation(fields: [speechAnalysisId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Cascade)
+  producerAttempt             WorkflowStageAttempt         @relation(fields: [producerAttemptId], references: [id], onDelete: Restrict)
+  inputArtifact               MediaArtifact                @relation("DiarizationInputArtifact", fields: [inputArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  manifestArtifact            MediaArtifact                @relation("DiarizationManifestArtifact", fields: [manifestArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  clusters                    SpeakerCluster[]
+  characterIdentificationRuns CharacterIdentificationRun[]
+
+  @@unique([id, speechAnalysisId], map: "diarization_runs_id_analysis_key")
+  @@unique([speechAnalysisId, organizationId, projectId, sourceVideoId], map: "diarization_runs_analysis_tenant_source_key")
+  @@index([inputArtifactId], map: "diarization_runs_input_artifact_id_idx")
+  @@map("diarization_runs")
+}
+
+model SpeakerCluster {
+  id                    String   @id @db.Uuid
+  diarizationRunId      String   @map("diarization_run_id") @db.Uuid
+  ordinal               Int
+  providerLabel         String   @map("provider_label") @db.VarChar(100)
+  confidenceBasisPoints Int?     @map("confidence_basis_points")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  diarizationRun DiarizationRun               @relation(fields: [diarizationRunId], references: [id], onDelete: Cascade)
+  turns          SpeakerTurn[]
+  assignments    SpeakerCharacterAssignment[]
+
+  @@unique([diarizationRunId, ordinal], map: "speaker_clusters_run_ordinal_key")
+  @@unique([id, diarizationRunId], map: "speaker_clusters_id_run_key")
+  @@index([diarizationRunId, providerLabel], map: "speaker_clusters_run_label_idx")
+  @@map("speaker_clusters")
+}
+
+model SpeakerTurn {
+  id                    String   @id @db.Uuid
+  diarizationRunId      String   @map("diarization_run_id") @db.Uuid
+  speakerClusterId      String   @map("speaker_cluster_id") @db.Uuid
+  isExclusive           Boolean  @default(false) @map("is_exclusive")
+  sequenceNumber        Int      @map("sequence_number")
+  startTimeUs           BigInt   @map("start_time_us")
+  endTimeUs             BigInt   @map("end_time_us")
+  hasOverlap            Boolean  @default(false) @map("has_overlap")
+  confidenceBasisPoints Int?     @map("confidence_basis_points")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  speakerCluster   SpeakerCluster    @relation(fields: [speakerClusterId, diarizationRunId], references: [id, diarizationRunId], onDelete: Cascade)
+  dialogueSegments DialogueSegment[]
+
+  @@unique([diarizationRunId, isExclusive, sequenceNumber], map: "speaker_turns_run_timeline_sequence_key")
+  @@unique([id, diarizationRunId, isExclusive], map: "speaker_turns_id_run_timeline_key")
+  @@index([diarizationRunId, isExclusive, startTimeUs, id], map: "speaker_turns_run_timeline_start_idx")
+  @@index([speakerClusterId, isExclusive, startTimeUs, id], map: "speaker_turns_cluster_timeline_start_idx")
+  @@map("speaker_turns")
+}
+
+model Character {
+  id             String          @id @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  projectId      String          @map("project_id") @db.Uuid
+  stableKey      String          @map("stable_key") @db.VarChar(100)
+  displayName    String?         @map("display_name") @db.VarChar(160)
+  origin         CharacterOrigin @default(DETECTED)
+  status         CharacterStatus @default(ACTIVE)
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project      Project                      @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  assignments  SpeakerCharacterAssignment[]
+
+  @@unique([projectId, stableKey], map: "characters_project_stable_key")
+  @@unique([id, projectId, organizationId], map: "characters_id_project_organization_key")
+  @@index([organizationId, projectId, createdAt, id], map: "characters_org_project_created_idx")
+  @@map("characters")
+}
+
+model CharacterIdentificationRun {
+  id                 String   @id @db.Uuid
+  speechAnalysisId   String   @unique(map: "character_identification_runs_analysis_key") @map("speech_analysis_id") @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  sourceVideoId      String   @map("source_video_id") @db.Uuid
+  transcriptionRunId String   @map("transcription_run_id") @db.Uuid
+  diarizationRunId   String   @map("diarization_run_id") @db.Uuid
+  producerAttemptId  String   @unique(map: "character_identification_runs_producer_attempt_key") @map("producer_attempt_id") @db.Uuid
+  manifestArtifactId String   @unique(map: "character_identification_runs_manifest_artifact_key") @map("manifest_artifact_id") @db.Uuid
+  contractVersion    Int      @map("contract_version")
+  resolverName       String   @map("resolver_name") @db.VarChar(100)
+  resolverVersion    String   @map("resolver_version") @db.VarChar(160)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  speechAnalysis   SpeechAnalysis               @relation(fields: [speechAnalysisId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Cascade)
+  transcriptionRun TranscriptionRun             @relation(fields: [transcriptionRunId, speechAnalysisId], references: [id, speechAnalysisId], onDelete: Restrict)
+  diarizationRun   DiarizationRun               @relation(fields: [diarizationRunId, speechAnalysisId], references: [id, speechAnalysisId], onDelete: Restrict)
+  producerAttempt  WorkflowStageAttempt         @relation(fields: [producerAttemptId], references: [id], onDelete: Restrict)
+  manifestArtifact MediaArtifact                @relation("CharacterIdentificationManifestArtifact", fields: [manifestArtifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+  assignments      SpeakerCharacterAssignment[]
+  dialogueSegments DialogueSegment[]
+
+  @@unique([id, speechAnalysisId, transcriptionRunId, diarizationRunId], map: "character_identification_runs_id_input_runs_key")
+  @@unique([id, diarizationRunId, organizationId, projectId], map: "character_identification_runs_id_diarization_tenant_key")
+  @@unique([speechAnalysisId, organizationId, projectId, sourceVideoId], map: "character_identification_runs_analysis_tenant_source_key")
+  @@index([transcriptionRunId], map: "character_identification_runs_transcription_id_idx")
+  @@index([diarizationRunId], map: "character_identification_runs_diarization_id_idx")
+  @@map("character_identification_runs")
+}
+
+model SpeakerCharacterAssignment {
+  id                           String   @id @db.Uuid
+  characterIdentificationRunId String   @map("character_identification_run_id") @db.Uuid
+  diarizationRunId             String   @map("diarization_run_id") @db.Uuid
+  speakerClusterId             String   @map("speaker_cluster_id") @db.Uuid
+  characterId                  String   @map("character_id") @db.Uuid
+  organizationId               String   @map("organization_id") @db.Uuid
+  projectId                    String   @map("project_id") @db.Uuid
+  confidenceBasisPoints        Int?     @map("confidence_basis_points")
+  assignmentMethod             String   @map("assignment_method") @db.VarChar(80)
+  firstAppearanceTimeUs        BigInt   @map("first_appearance_time_us")
+  speakingDurationUs           BigInt   @default(0) @map("speaking_duration_us")
+  segmentCount                 Int      @default(0) @map("segment_count")
+  wordCount                    Int      @default(0) @map("word_count")
+  createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  characterIdentificationRun CharacterIdentificationRun @relation(fields: [characterIdentificationRunId, diarizationRunId, organizationId, projectId], references: [id, diarizationRunId, organizationId, projectId], onDelete: Cascade)
+  speakerCluster             SpeakerCluster             @relation(fields: [speakerClusterId, diarizationRunId], references: [id, diarizationRunId], onDelete: Restrict)
+  character                  Character                  @relation(fields: [characterId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  dialogueSegments           DialogueSegment[]
+
+  @@unique([characterIdentificationRunId, speakerClusterId], map: "speaker_character_assignments_run_cluster_key")
+  @@unique([id, characterIdentificationRunId], map: "speaker_character_assignments_id_run_key")
+  @@index([characterIdentificationRunId, firstAppearanceTimeUs, id], map: "speaker_character_assignments_run_first_appearance_idx")
+  @@index([speakerClusterId], map: "speaker_character_assignments_cluster_id_idx")
+  @@index([characterId, createdAt, id], map: "speaker_character_assignments_character_created_idx")
+  @@map("speaker_character_assignments")
+}
+
+model DialogueSegment {
+  id                                 String   @id @db.Uuid
+  characterIdentificationRunId       String   @map("character_identification_run_id") @db.Uuid
+  speechAnalysisId                   String   @map("speech_analysis_id") @db.Uuid
+  transcriptionRunId                 String   @map("transcription_run_id") @db.Uuid
+  diarizationRunId                   String   @map("diarization_run_id") @db.Uuid
+  speakerAssignmentId                String?  @map("speaker_assignment_id") @db.Uuid
+  transcriptSegmentId                String   @map("transcript_segment_id") @db.Uuid
+  speakerTurnId                      String?  @map("speaker_turn_id") @db.Uuid
+  speakerTurnIsExclusive             Boolean? @map("speaker_turn_is_exclusive")
+  sequenceNumber                     Int      @map("sequence_number")
+  startTimeUs                        BigInt   @map("start_time_us")
+  endTimeUs                          BigInt   @map("end_time_us")
+  text                               String   @db.Text
+  sourceWordStartSequence            Int?     @map("source_word_start_sequence")
+  sourceWordEndSequence              Int?     @map("source_word_end_sequence")
+  assignmentMethod                   String   @map("assignment_method") @db.VarChar(80)
+  assignmentConfidenceBasisPoints    Int?     @map("assignment_confidence_basis_points")
+  transcriptionConfidenceBasisPoints Int?     @map("transcription_confidence_basis_points")
+  isOverlapping                      Boolean  @default(false) @map("is_overlapping")
+  createdAt                          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  characterIdentificationRun CharacterIdentificationRun  @relation(fields: [characterIdentificationRunId, speechAnalysisId, transcriptionRunId, diarizationRunId], references: [id, speechAnalysisId, transcriptionRunId, diarizationRunId], onDelete: Cascade)
+  speakerAssignment          SpeakerCharacterAssignment? @relation(fields: [speakerAssignmentId, characterIdentificationRunId], references: [id, characterIdentificationRunId], onDelete: Restrict)
+  transcriptSegment          TranscriptSegment           @relation(fields: [transcriptSegmentId, transcriptionRunId], references: [id, transcriptionRunId], onDelete: Restrict)
+  speakerTurn                SpeakerTurn?                @relation(fields: [speakerTurnId, diarizationRunId, speakerTurnIsExclusive], references: [id, diarizationRunId, isExclusive], onDelete: Restrict)
+  localizedDialogues         LocalizedDialogue[]
+
+  @@unique([characterIdentificationRunId, sequenceNumber], map: "dialogue_segments_run_sequence_key")
+  @@unique([id, speechAnalysisId], map: "dialogue_segments_id_analysis_key")
+  @@index([characterIdentificationRunId, startTimeUs, id], map: "dialogue_segments_run_start_idx")
+  @@index([speakerAssignmentId, startTimeUs, id], map: "dialogue_segments_assignment_start_idx")
+  @@index([transcriptSegmentId], map: "dialogue_segments_transcript_segment_id_idx")
+  @@index([speakerTurnId], map: "dialogue_segments_speaker_turn_id_idx")
+  @@map("dialogue_segments")
+}
+
+model ProjectSpeechAnalysisSelection {
+  organizationId   String   @map("organization_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  speechAnalysisId String   @unique(map: "project_speech_analysis_selections_analysis_key") @map("speech_analysis_id") @db.Uuid
+  selectedByUserId String?  @map("selected_by_user_id") @db.Uuid
+  revision         Int      @default(1)
+  selectedAt       DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project               Project                 @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  speechAnalysis        SpeechAnalysis          @relation(fields: [speechAnalysisId, organizationId, projectId], references: [id, organizationId, projectId], onDelete: Restrict)
+  selectedByMembership  OrganizationMembership? @relation(fields: [organizationId, selectedByUserId], references: [organizationId, userId], onDelete: Restrict)
+  localizationWorkspace LocalizationWorkspace?
+
+  @@id([organizationId, projectId])
+  @@unique([projectId, organizationId], map: "project_speech_analysis_selections_project_tenant_key")
+  @@unique([speechAnalysisId, organizationId, projectId], map: "project_speech_analysis_selections_analysis_tenant_key")
+  @@index([selectedByUserId], map: "project_speech_analysis_selections_selected_by_idx")
+  @@map("project_speech_analysis_selections")
+}

@@ -1,6 +1,8 @@
-import path from 'node:path';
-
 import type { NextConfig } from 'next';
+
+import { validateVercelBuildEnvironment } from './src/lib/build-environment';
+
+validateVercelBuildEnvironment();
 
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -16,9 +18,6 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   poweredByHeader: false,
   reactStrictMode: true,
-  turbopack: {
-    root: path.join(__dirname, '../../'),
-  },
   async headers() {
     return [
       {

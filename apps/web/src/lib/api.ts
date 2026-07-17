@@ -11,21 +11,69 @@ export class ApiError extends Error {
   }
 }
 
+export interface ApiResponse<T> {
+  data: T | null;
+  etag: string | null;
+  notModified: boolean;
+  status: number;
+}
+
+export async function apiRequestResult<T>(
+  path: string,
+  init: RequestInit = {},
+  accessToken?: string,
+): Promise<ApiResponse<T>> {
+  const response = await executeRequest(path, init, accessToken);
+  if (response.status === 304) {
+    return {
+      data: null,
+      etag: response.headers.get('etag'),
+      notModified: true,
+      status: response.status,
+    };
+  }
+  await assertSuccessful(response);
+  return {
+    data: response.status === 204 ? null : ((await response.json()) as T),
+    etag: response.headers.get('etag'),
+    notModified: false,
+    status: response.status,
+  };
+}
+
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
   accessToken?: string,
 ): Promise<T> {
+  const result = await apiRequestResult<T>(path, init, accessToken);
+  if (result.notModified) {
+    throw new ApiError(304, 'The requested resource has not changed.');
+  }
+  if (result.status === 204) return undefined as T;
+  return result.data as T;
+}
+
+async function executeRequest(
+  path: string,
+  init: RequestInit,
+  accessToken?: string,
+): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set('accept', 'application/json');
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
   if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  return fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    credentials: 'include',
+    // Authentication is an explicit bearer token. Never attach ambient
+    // browser cookies to the cross-origin business API.
+    credentials: 'omit',
     headers,
   });
+}
+
+async function assertSuccessful(response: Response): Promise<void> {
   if (!response.ok) {
     let message = `Request failed with status ${response.status}.`;
     try {
@@ -37,6 +85,4 @@ export async function apiRequest<T>(
     }
     throw new ApiError(response.status, message);
   }
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
 }

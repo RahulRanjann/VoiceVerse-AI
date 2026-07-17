@@ -1,0 +1,420 @@
+enum TranslationEditorState {
+  DRAFT     @map("draft")
+  IN_REVIEW @map("in_review")
+  APPROVED  @map("approved")
+
+  @@map("translation_editor_state")
+}
+
+enum TranslationGenerationStatus {
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+
+  @@map("translation_generation_status")
+}
+
+model LocalizationWorkspace {
+  id               String   @id @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  speechAnalysisId String   @map("speech_analysis_id") @db.Uuid
+  createdByUserId  String   @map("created_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization        Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project             Project                        @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  speechAnalysis      SpeechAnalysis                 @relation(fields: [speechAnalysisId, organizationId, projectId], references: [id, organizationId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "localization_workspaces_speech_analysis_fkey")
+  committedSelection  ProjectSpeechAnalysisSelection @relation(fields: [speechAnalysisId, organizationId, projectId], references: [speechAnalysisId, organizationId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "localization_workspaces_committed_selection_fkey")
+  createdByMembership OrganizationMembership         @relation("LocalizationWorkspaceCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  tracks              LocalizationTrack[]
+  scenes              LocalizationScene[]
+  dialogues           LocalizedDialogue[]
+  generations         TranslationGeneration[]
+
+  @@unique([organizationId, projectId], map: "localization_workspaces_org_project_key")
+  @@unique([speechAnalysisId, organizationId, projectId], map: "localization_workspaces_analysis_tenant_key")
+  @@unique([id, organizationId, projectId], map: "localization_workspaces_id_tenant_key")
+  @@unique([id, speechAnalysisId, organizationId, projectId], map: "localization_workspaces_id_analysis_tenant_key")
+  @@index([projectId, organizationId], map: "localization_workspaces_project_tenant_idx")
+  @@index([organizationId, createdByUserId], map: "localization_workspaces_creator_idx")
+  @@map("localization_workspaces")
+}
+
+model LocalizationTrack {
+  id               String   @id @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  targetLanguageId String   @map("target_language_id") @db.Uuid
+  createdByUserId  String   @map("created_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace           LocalizationWorkspace   @relation(fields: [workspaceId, organizationId, projectId], references: [id, organizationId, projectId], onDelete: Cascade)
+  targetLanguage      ProjectTargetLanguage   @relation(fields: [projectId, targetLanguageId], references: [projectId, languageId], onDelete: Restrict)
+  createdByMembership OrganizationMembership  @relation("LocalizationTrackCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  translations        DialogueTranslation[]
+  glossaryEntries     GlossaryEntry[]
+  generations         TranslationGeneration[]
+
+  @@unique([workspaceId, targetLanguageId], map: "localization_tracks_workspace_language_key")
+  @@unique([id, workspaceId, organizationId, projectId], map: "localization_tracks_id_workspace_tenant_key")
+  @@index([organizationId, projectId, createdAt, id], map: "localization_tracks_tenant_created_idx")
+  @@index([projectId, targetLanguageId], map: "localization_tracks_project_language_idx")
+  @@index([organizationId, createdByUserId], map: "localization_tracks_creator_idx")
+  @@map("localization_tracks")
+}
+
+model LocalizationScene {
+  id              String   @id @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  ordinal         Int
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace           LocalizationWorkspace       @relation(fields: [workspaceId, organizationId, projectId], references: [id, organizationId, projectId], onDelete: Cascade)
+  createdByMembership OrganizationMembership      @relation("LocalizationSceneCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  revisions           LocalizationSceneRevision[]
+  selection           LocalizationSceneSelection?
+  dialogues           LocalizedDialogue[]
+  generations         TranslationGeneration[]
+
+  @@unique([workspaceId, ordinal], map: "localization_scenes_workspace_ordinal_key")
+  @@unique([id, workspaceId, organizationId, projectId], map: "localization_scenes_id_workspace_tenant_key")
+  @@index([organizationId, projectId, workspaceId, ordinal, id], map: "localization_scenes_tenant_timeline_idx")
+  @@index([organizationId, createdByUserId], map: "localization_scenes_creator_idx")
+  @@map("localization_scenes")
+}
+
+model LocalizationSceneRevision {
+  id              String   @id @db.Uuid
+  sceneId         String   @map("scene_id") @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  revisionNumber  Int      @map("revision_number")
+  startTimeUs     BigInt   @map("start_time_us")
+  endTimeUs       BigInt   @map("end_time_us")
+  title           String?  @db.VarChar(200)
+  summary         String?  @db.VarChar(4000)
+  culturalContext String?  @map("cultural_context") @db.VarChar(8000)
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  scene               LocalizationScene           @relation(fields: [sceneId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Restrict)
+  createdByMembership OrganizationMembership      @relation("LocalizationSceneRevisionCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  selectedBy          LocalizationSceneSelection? @relation("SelectedLocalizationSceneRevision")
+
+  @@unique([sceneId, revisionNumber], map: "localization_scene_revisions_scene_revision_key")
+  @@unique([id, sceneId, workspaceId, organizationId, projectId], map: "localization_scene_revisions_id_scene_tenant_key")
+  @@index([organizationId, projectId, sceneId, revisionNumber(sort: Desc), id(sort: Desc)], map: "localization_scene_revisions_tenant_history_idx")
+  @@index([organizationId, createdByUserId], map: "localization_scene_revisions_creator_idx")
+  @@map("localization_scene_revisions")
+}
+
+model LocalizationSceneSelection {
+  sceneId            String   @map("scene_id") @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  organizationId     String   @map("organization_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  selectedRevisionId String   @map("selected_revision_id") @db.Uuid
+  revision           Int      @default(1)
+  updatedByUserId    String   @map("updated_by_user_id") @db.Uuid
+  selectedAt         DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  scene               LocalizationScene         @relation(fields: [sceneId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  selectedRevision    LocalizationSceneRevision @relation("SelectedLocalizationSceneRevision", fields: [selectedRevisionId, sceneId, workspaceId, organizationId, projectId], references: [id, sceneId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  updatedByMembership OrganizationMembership    @relation("LocalizationSceneSelectionUpdater", fields: [organizationId, updatedByUserId], references: [organizationId, userId], onDelete: Restrict)
+
+  @@id([sceneId, organizationId, projectId])
+  @@unique([sceneId, workspaceId, organizationId, projectId], map: "localization_scene_selections_scene_key")
+  @@unique([selectedRevisionId, sceneId, workspaceId, organizationId, projectId], map: "localization_scene_selections_revision_key")
+  @@index([organizationId, updatedByUserId], map: "localization_scene_selections_updater_idx")
+  @@map("localization_scene_selections")
+}
+
+model LocalizedDialogue {
+  id                String   @id @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  organizationId    String   @map("organization_id") @db.Uuid
+  projectId         String   @map("project_id") @db.Uuid
+  speechAnalysisId  String   @map("speech_analysis_id") @db.Uuid
+  sceneId           String   @map("scene_id") @db.Uuid
+  dialogueSegmentId String   @map("dialogue_segment_id") @db.Uuid
+  sequenceNumber    Int      @map("sequence_number")
+  startTimeUs       BigInt   @map("start_time_us")
+  endTimeUs         BigInt   @map("end_time_us")
+  createdByUserId   String   @map("created_by_user_id") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace           LocalizationWorkspace    @relation(fields: [workspaceId, speechAnalysisId, organizationId, projectId], references: [id, speechAnalysisId, organizationId, projectId], onDelete: Cascade)
+  scene               LocalizationScene        @relation(fields: [sceneId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Restrict)
+  dialogueSegment     DialogueSegment          @relation(fields: [dialogueSegmentId, speechAnalysisId], references: [id, speechAnalysisId], onDelete: Restrict)
+  createdByMembership OrganizationMembership   @relation("LocalizedDialogueCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  sourceRevisions     SourceDialogueRevision[]
+  sourceSelection     SourceDialogueSelection?
+  translations        DialogueTranslation[]
+
+  @@unique([workspaceId, dialogueSegmentId], map: "localized_dialogues_workspace_segment_key")
+  @@unique([workspaceId, sequenceNumber], map: "localized_dialogues_workspace_sequence_key")
+  @@unique([id, workspaceId, organizationId, projectId], map: "localized_dialogues_id_workspace_tenant_key")
+  @@index([organizationId, projectId, sceneId, startTimeUs, id], map: "localized_dialogues_tenant_scene_timeline_idx")
+  @@index([dialogueSegmentId, speechAnalysisId], map: "localized_dialogues_source_segment_idx")
+  @@index([organizationId, createdByUserId], map: "localized_dialogues_creator_idx")
+  @@map("localized_dialogues")
+}
+
+model SourceDialogueRevision {
+  id                  String   @id @db.Uuid
+  localizedDialogueId String   @map("localized_dialogue_id") @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  revisionNumber      Int      @map("revision_number")
+  sourceText          String   @map("source_text") @db.Text
+  createdByUserId     String   @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  localizedDialogue    LocalizedDialogue        @relation(fields: [localizedDialogueId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Restrict)
+  createdByMembership  OrganizationMembership   @relation("SourceDialogueRevisionCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  selectedBy           SourceDialogueSelection? @relation("SelectedSourceDialogueRevision")
+  translationRevisions TranslationRevision[]
+
+  @@unique([localizedDialogueId, revisionNumber], map: "source_dialogue_revisions_dialogue_revision_key")
+  @@unique([id, localizedDialogueId, workspaceId, organizationId, projectId], map: "source_dialogue_revisions_id_dialogue_tenant_key")
+  @@index([organizationId, projectId, localizedDialogueId, revisionNumber(sort: Desc), id(sort: Desc)], map: "source_dialogue_revisions_tenant_history_idx")
+  @@index([organizationId, createdByUserId], map: "source_dialogue_revisions_creator_idx")
+  @@map("source_dialogue_revisions")
+}
+
+model SourceDialogueSelection {
+  localizedDialogueId String   @map("localized_dialogue_id") @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  selectedRevisionId  String   @map("selected_revision_id") @db.Uuid
+  revision            Int      @default(1)
+  updatedByUserId     String   @map("updated_by_user_id") @db.Uuid
+  selectedAt          DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  localizedDialogue   LocalizedDialogue      @relation(fields: [localizedDialogueId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  selectedRevision    SourceDialogueRevision @relation("SelectedSourceDialogueRevision", fields: [selectedRevisionId, localizedDialogueId, workspaceId, organizationId, projectId], references: [id, localizedDialogueId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  updatedByMembership OrganizationMembership @relation("SourceDialogueSelectionUpdater", fields: [organizationId, updatedByUserId], references: [organizationId, userId], onDelete: Restrict)
+
+  @@id([localizedDialogueId, organizationId, projectId])
+  @@unique([localizedDialogueId, workspaceId, organizationId, projectId], map: "source_dialogue_selections_dialogue_key")
+  @@unique([selectedRevisionId, localizedDialogueId, workspaceId, organizationId, projectId], map: "source_dialogue_selections_revision_key")
+  @@index([organizationId, updatedByUserId], map: "source_dialogue_selections_updater_idx")
+  @@map("source_dialogue_selections")
+}
+
+model DialogueTranslation {
+  id                  String   @id @db.Uuid
+  trackId             String   @map("track_id") @db.Uuid
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  organizationId      String   @map("organization_id") @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  localizedDialogueId String   @map("localized_dialogue_id") @db.Uuid
+  createdByUserId     String   @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  track               LocalizationTrack      @relation(fields: [trackId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  localizedDialogue   LocalizedDialogue      @relation(fields: [localizedDialogueId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  createdByMembership OrganizationMembership @relation("DialogueTranslationCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  revisions           TranslationRevision[]
+  selection           TranslationSelection?
+
+  @@unique([trackId, localizedDialogueId], map: "dialogue_translations_track_dialogue_key")
+  @@unique([id, trackId, workspaceId, organizationId, projectId], map: "dialogue_translations_id_track_tenant_key")
+  @@index([organizationId, projectId, trackId, createdAt, id], map: "dialogue_translations_tenant_track_created_idx")
+  @@index([localizedDialogueId, workspaceId, organizationId, projectId], map: "dialogue_translations_dialogue_idx")
+  @@index([organizationId, createdByUserId], map: "dialogue_translations_creator_idx")
+  @@map("dialogue_translations")
+}
+
+model TranslationRevision {
+  id                       String   @id @db.Uuid
+  dialogueTranslationId    String   @map("dialogue_translation_id") @db.Uuid
+  trackId                  String   @map("track_id") @db.Uuid
+  workspaceId              String   @map("workspace_id") @db.Uuid
+  organizationId           String   @map("organization_id") @db.Uuid
+  projectId                String   @map("project_id") @db.Uuid
+  localizedDialogueId      String   @map("localized_dialogue_id") @db.Uuid
+  sourceDialogueRevisionId String   @map("source_dialogue_revision_id") @db.Uuid
+  generationId             String?  @map("generation_id") @db.Uuid
+  revisionNumber           Int      @map("revision_number")
+  translatedText           String   @map("translated_text") @db.Text
+  createdByUserId          String   @map("created_by_user_id") @db.Uuid
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  dialogueTranslation DialogueTranslation    @relation(fields: [dialogueTranslationId, trackId, workspaceId, organizationId, projectId], references: [id, trackId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  sourceRevision      SourceDialogueRevision @relation(fields: [sourceDialogueRevisionId, localizedDialogueId, workspaceId, organizationId, projectId], references: [id, localizedDialogueId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  generation          TranslationGeneration? @relation(fields: [generationId, trackId, workspaceId, organizationId, projectId], references: [id, trackId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  createdByMembership OrganizationMembership @relation("TranslationRevisionCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  selectedBy          TranslationSelection?  @relation("SelectedTranslationRevision")
+
+  @@unique([dialogueTranslationId, revisionNumber], map: "translation_revisions_translation_revision_key")
+  @@unique([id, dialogueTranslationId, trackId, workspaceId, organizationId, projectId], map: "translation_revisions_id_translation_tenant_key")
+  @@index([organizationId, projectId, dialogueTranslationId, revisionNumber(sort: Desc), id(sort: Desc)], map: "translation_revisions_tenant_history_idx")
+  @@index([sourceDialogueRevisionId, localizedDialogueId, workspaceId, organizationId, projectId], map: "translation_revisions_source_revision_idx")
+  @@index([generationId, trackId, workspaceId, organizationId, projectId], map: "translation_revisions_generation_idx")
+  @@index([organizationId, createdByUserId], map: "translation_revisions_creator_idx")
+  @@map("translation_revisions")
+}
+
+model TranslationSelection {
+  dialogueTranslationId String                 @map("dialogue_translation_id") @db.Uuid
+  trackId               String                 @map("track_id") @db.Uuid
+  workspaceId           String                 @map("workspace_id") @db.Uuid
+  organizationId        String                 @map("organization_id") @db.Uuid
+  projectId             String                 @map("project_id") @db.Uuid
+  selectedRevisionId    String                 @map("selected_revision_id") @db.Uuid
+  editorState           TranslationEditorState @default(DRAFT) @map("editor_state")
+  revision              Int                    @default(1)
+  updatedByUserId       String                 @map("updated_by_user_id") @db.Uuid
+  selectedAt            DateTime               @default(now()) @map("selected_at") @db.Timestamptz(6)
+  updatedAt             DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  dialogueTranslation DialogueTranslation    @relation(fields: [dialogueTranslationId, trackId, workspaceId, organizationId, projectId], references: [id, trackId, workspaceId, organizationId, projectId], onDelete: Cascade)
+  selectedRevision    TranslationRevision    @relation("SelectedTranslationRevision", fields: [selectedRevisionId, dialogueTranslationId, trackId, workspaceId, organizationId, projectId], references: [id, dialogueTranslationId, trackId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  updatedByMembership OrganizationMembership @relation("TranslationSelectionUpdater", fields: [organizationId, updatedByUserId], references: [organizationId, userId], onDelete: Restrict)
+
+  @@id([dialogueTranslationId, organizationId, projectId])
+  @@unique([dialogueTranslationId, trackId, workspaceId, organizationId, projectId], map: "translation_selections_translation_key")
+  @@unique([selectedRevisionId, dialogueTranslationId, trackId, workspaceId, organizationId, projectId], map: "translation_selections_revision_key")
+  @@index([organizationId, projectId, trackId, editorState, updatedAt, dialogueTranslationId], map: "translation_selections_editor_queue_idx")
+  @@index([organizationId, updatedByUserId], map: "translation_selections_updater_idx")
+  @@map("translation_selections")
+}
+
+model GlossaryEntry {
+  id              String   @id @db.Uuid
+  trackId         String   @map("track_id") @db.Uuid
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  projectId       String   @map("project_id") @db.Uuid
+  createdByUserId String   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  track               LocalizationTrack      @relation(fields: [trackId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  createdByMembership OrganizationMembership @relation("GlossaryEntryCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  revisions           GlossaryRevision[]
+  selection           GlossarySelection?
+
+  @@unique([id, trackId, workspaceId, organizationId, projectId], map: "glossary_entries_id_track_tenant_key")
+  @@index([organizationId, projectId, trackId, createdAt, id], map: "glossary_entries_tenant_track_created_idx")
+  @@index([organizationId, createdByUserId], map: "glossary_entries_creator_idx")
+  @@map("glossary_entries")
+}
+
+model GlossaryRevision {
+  id                   String   @id @db.Uuid
+  glossaryEntryId      String   @map("glossary_entry_id") @db.Uuid
+  trackId              String   @map("track_id") @db.Uuid
+  workspaceId          String   @map("workspace_id") @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  projectId            String   @map("project_id") @db.Uuid
+  revisionNumber       Int      @map("revision_number")
+  sourceTerm           String   @map("source_term") @db.VarChar(500)
+  normalizedSourceTerm String   @map("normalized_source_term") @db.VarChar(500)
+  targetTerm           String?  @map("target_term") @db.VarChar(500)
+  notes                String?  @db.VarChar(2000)
+  caseSensitive        Boolean  @default(false) @map("case_sensitive")
+  doNotTranslate       Boolean  @default(false) @map("do_not_translate")
+  createdByUserId      String   @map("created_by_user_id") @db.Uuid
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  glossaryEntry       GlossaryEntry          @relation(fields: [glossaryEntryId, trackId, workspaceId, organizationId, projectId], references: [id, trackId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  createdByMembership OrganizationMembership @relation("GlossaryRevisionCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  selectedBy          GlossarySelection?     @relation("SelectedGlossaryRevision")
+
+  @@unique([glossaryEntryId, revisionNumber], map: "glossary_revisions_entry_revision_key")
+  @@unique([id, glossaryEntryId, trackId, workspaceId, organizationId, projectId], map: "glossary_revisions_id_entry_tenant_key")
+  @@index([organizationId, projectId, trackId, normalizedSourceTerm, id], map: "glossary_revisions_tenant_source_term_idx")
+  @@index([organizationId, projectId, glossaryEntryId, revisionNumber(sort: Desc), id(sort: Desc)], map: "glossary_revisions_tenant_history_idx")
+  @@index([organizationId, createdByUserId], map: "glossary_revisions_creator_idx")
+  @@map("glossary_revisions")
+}
+
+model GlossarySelection {
+  glossaryEntryId              String   @map("glossary_entry_id") @db.Uuid
+  trackId                      String   @map("track_id") @db.Uuid
+  workspaceId                  String   @map("workspace_id") @db.Uuid
+  organizationId               String   @map("organization_id") @db.Uuid
+  projectId                    String   @map("project_id") @db.Uuid
+  selectedRevisionId           String   @map("selected_revision_id") @db.Uuid
+  selectedNormalizedSourceTerm String   @map("selected_normalized_source_term") @db.VarChar(500)
+  selectedCaseSensitive        Boolean  @map("selected_case_sensitive")
+  revision                     Int      @default(1)
+  updatedByUserId              String   @map("updated_by_user_id") @db.Uuid
+  selectedAt                   DateTime @default(now()) @map("selected_at") @db.Timestamptz(6)
+  updatedAt                    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  glossaryEntry       GlossaryEntry          @relation(fields: [glossaryEntryId, trackId, workspaceId, organizationId, projectId], references: [id, trackId, workspaceId, organizationId, projectId], onDelete: Cascade)
+  selectedRevision    GlossaryRevision       @relation("SelectedGlossaryRevision", fields: [selectedRevisionId, glossaryEntryId, trackId, workspaceId, organizationId, projectId], references: [id, glossaryEntryId, trackId, workspaceId, organizationId, projectId], onDelete: Restrict)
+  updatedByMembership OrganizationMembership @relation("GlossarySelectionUpdater", fields: [organizationId, updatedByUserId], references: [organizationId, userId], onDelete: Restrict)
+
+  @@id([glossaryEntryId, organizationId, projectId])
+  @@unique([glossaryEntryId, trackId, workspaceId, organizationId, projectId], map: "glossary_selections_entry_key")
+  @@unique([selectedRevisionId, glossaryEntryId, trackId, workspaceId, organizationId, projectId], map: "glossary_selections_revision_key")
+  @@unique([trackId, selectedCaseSensitive, selectedNormalizedSourceTerm], map: "glossary_selections_active_source_key")
+  @@index([organizationId, updatedByUserId], map: "glossary_selections_updater_idx")
+  @@map("glossary_selections")
+}
+
+model TranslationGeneration {
+  id                    String                      @id @db.Uuid
+  organizationId        String                      @map("organization_id") @db.Uuid
+  projectId             String                      @map("project_id") @db.Uuid
+  workspaceId           String                      @map("workspace_id") @db.Uuid
+  trackId               String                      @map("track_id") @db.Uuid
+  sceneId               String                      @map("scene_id") @db.Uuid
+  createdByUserId       String                      @map("created_by_user_id") @db.Uuid
+  idempotencyKey        String                      @map("idempotency_key") @db.VarChar(128)
+  status                TranslationGenerationStatus @default(QUEUED)
+  attemptCount          Int                         @default(0) @map("attempt_count")
+  maxAttempts           Int                         @default(3) @map("max_attempts")
+  leaseToken            String?                     @map("lease_token") @db.Uuid
+  leasedUntil           DateTime?                   @map("leased_until") @db.Timestamptz(6)
+  heartbeatAt           DateTime?                   @map("heartbeat_at") @db.Timestamptz(6)
+  executionId           String?                     @unique(map: "translation_generations_execution_id_key") @map("execution_id") @db.Uuid
+  providerName          String                      @map("provider_name") @db.VarChar(100)
+  modelId               String                      @map("model_id") @db.VarChar(160)
+  modelRevision         String                      @map("model_revision") @db.VarChar(160)
+  runtimeVersion        String                      @map("runtime_version") @db.VarChar(100)
+  promptVersion         String                      @map("prompt_version") @db.VarChar(100)
+  configurationSnapshot Json                        @map("configuration_snapshot") @db.JsonB
+  configurationHash     String                      @map("configuration_hash") @db.Char(64)
+  inputSnapshot         Json                        @map("input_snapshot") @db.JsonB
+  inputRevisionHash     String                      @map("input_revision_hash") @db.Char(64)
+  contextSnapshot       Json                        @map("context_snapshot") @db.JsonB
+  contextSnapshotHash   String                      @map("context_snapshot_hash") @db.Char(64)
+  errorCode             String?                     @map("error_code") @db.VarChar(100)
+  errorDetail           String?                     @map("error_detail") @db.Text
+  queuedAt              DateTime                    @default(now()) @map("queued_at") @db.Timestamptz(6)
+  startedAt             DateTime?                   @map("started_at") @db.Timestamptz(6)
+  completedAt           DateTime?                   @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace            LocalizationWorkspace  @relation(fields: [workspaceId, organizationId, projectId], references: [id, organizationId, projectId], onDelete: Cascade)
+  track                LocalizationTrack      @relation(fields: [trackId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Cascade)
+  scene                LocalizationScene      @relation(fields: [sceneId, workspaceId, organizationId, projectId], references: [id, workspaceId, organizationId, projectId], onDelete: Restrict)
+  createdByMembership  OrganizationMembership @relation("TranslationGenerationCreator", fields: [organizationId, createdByUserId], references: [organizationId, userId], onDelete: Restrict)
+  translationRevisions TranslationRevision[]
+
+  @@unique([trackId, idempotencyKey], map: "translation_generations_track_idempotency_key")
+  @@unique([id, trackId, workspaceId, organizationId, projectId], map: "translation_generations_id_track_tenant_key")
+  @@index([status, leasedUntil, id], map: "translation_generations_status_lease_idx")
+  @@index([trackId, createdAt(sort: Desc), id(sort: Desc)], map: "translation_generations_track_created_idx")
+  @@index([sceneId, createdAt(sort: Desc), id(sort: Desc)], map: "translation_generations_scene_created_idx")
+  @@index([workspaceId, organizationId, projectId], map: "translation_generations_workspace_idx")
+  @@index([organizationId, projectId, status, queuedAt, id], map: "translation_generations_tenant_queue_idx")
+  @@index([organizationId, createdByUserId], map: "translation_generations_creator_idx")
+  @@map("translation_generations")
+}

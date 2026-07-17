@@ -1,0 +1,218 @@
+enum WorkflowJobKind {
+  SOURCE_PREPARATION @map("source_preparation")
+  SPEECH_ANALYSIS    @map("speech_analysis")
+
+  @@map("workflow_job_kind")
+}
+
+enum WorkflowJobStatus {
+  QUEUED           @map("queued")
+  RUNNING          @map("running")
+  SUCCEEDED        @map("succeeded")
+  FAILED           @map("failed")
+  CANCEL_REQUESTED @map("cancel_requested")
+  CANCELED         @map("canceled")
+
+  @@map("workflow_job_status")
+}
+
+enum WorkflowStageKind {
+  SOURCE_MEDIA_PREPARATION @map("source_media_preparation")
+  VOCAL_SEPARATION         @map("vocal_separation")
+  SPEECH_RECOGNITION       @map("speech_recognition")
+  SPEAKER_DIARIZATION      @map("speaker_diarization")
+  CHARACTER_IDENTIFICATION @map("character_identification")
+
+  @@map("workflow_stage_kind")
+}
+
+enum WorkflowStageStatus {
+  BLOCKED    @map("blocked")
+  QUEUED     @map("queued")
+  RUNNING    @map("running")
+  RETRY_WAIT @map("retry_wait")
+  SUCCEEDED  @map("succeeded")
+  FAILED     @map("failed")
+  CANCELED   @map("canceled")
+
+  @@map("workflow_stage_status")
+}
+
+enum WorkflowAttemptStatus {
+  QUEUED    @map("queued")
+  RUNNING   @map("running")
+  SUCCEEDED @map("succeeded")
+  FAILED    @map("failed")
+  TIMED_OUT @map("timed_out")
+  CANCELED  @map("canceled")
+
+  @@map("workflow_attempt_status")
+}
+
+enum WorkflowEntityType {
+  JOB     @map("job")
+  STAGE   @map("stage")
+  ATTEMPT @map("attempt")
+
+  @@map("workflow_entity_type")
+}
+
+model WorkflowJob {
+  id                String            @id @db.Uuid
+  organizationId    String            @map("organization_id") @db.Uuid
+  projectId         String            @map("project_id") @db.Uuid
+  sourceVideoId     String            @map("source_video_id") @db.Uuid
+  createdByUserId   String            @map("created_by_user_id") @db.Uuid
+  kind              WorkflowJobKind
+  status            WorkflowJobStatus @default(QUEUED)
+  pipelineVersion   String            @map("pipeline_version") @db.VarChar(100)
+  idempotencyKey    String            @map("idempotency_key") @db.VarChar(191)
+  revision          Int               @default(1)
+  failureCode       String?           @map("failure_code") @db.VarChar(100)
+  cancelRequestedAt DateTime?         @map("cancel_requested_at") @db.Timestamptz(6)
+  startedAt         DateTime?         @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime?         @map("completed_at") @db.Timestamptz(6)
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project        Project                    @relation(fields: [projectId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  sourceVideo    Video                      @relation(fields: [sourceVideoId, projectId, organizationId], references: [id, projectId, organizationId], onDelete: Restrict)
+  createdBy      User                       @relation("WorkflowJobCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  stages         WorkflowStage[]
+  transitions    WorkflowStateTransition[]
+  artifactInputs WorkflowJobArtifactInput[] @relation("WorkflowJobArtifactInputs")
+  speechAnalysis SpeechAnalysis?
+
+  @@unique([organizationId, idempotencyKey], map: "workflow_jobs_org_idempotency_key")
+  @@unique([sourceVideoId, kind, pipelineVersion], map: "workflow_jobs_video_kind_pipeline_key")
+  @@unique([id, organizationId, projectId, sourceVideoId], map: "workflow_jobs_id_tenant_source_key")
+  @@index([organizationId, createdAt(sort: Desc), id(sort: Desc)], map: "workflow_jobs_org_created_idx")
+  @@index([projectId, createdAt(sort: Desc), id(sort: Desc)], map: "workflow_jobs_project_created_idx")
+  @@index([sourceVideoId], map: "workflow_jobs_source_video_id_idx")
+  @@index([createdByUserId], map: "workflow_jobs_created_by_user_id_idx")
+  @@index([status, updatedAt, id], map: "workflow_jobs_status_updated_idx")
+  @@map("workflow_jobs")
+}
+
+model WorkflowStage {
+  id                    String              @id @db.Uuid
+  jobId                 String              @map("job_id") @db.Uuid
+  key                   String              @db.VarChar(100)
+  kind                  WorkflowStageKind
+  status                WorkflowStageStatus @default(QUEUED)
+  ordinal               Int
+  weightBasisPoints     Int                 @map("weight_basis_points")
+  progressBasisPoints   Int                 @default(0) @map("progress_basis_points")
+  maxAttempts           Int                 @default(3) @map("max_attempts")
+  configurationSnapshot Json                @map("configuration_snapshot") @db.JsonB
+  configurationHash     String              @map("configuration_hash") @db.Char(64)
+  readyAt               DateTime?           @default(now()) @map("ready_at") @db.Timestamptz(6)
+  startedAt             DateTime?           @map("started_at") @db.Timestamptz(6)
+  completedAt           DateTime?           @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job          WorkflowJob               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  attempts     WorkflowStageAttempt[]
+  transitions  WorkflowStateTransition[]
+  dependencies WorkflowStageDependency[] @relation("WorkflowStageDependencies")
+  dependants   WorkflowStageDependency[] @relation("WorkflowStageDependants")
+
+  @@unique([jobId, key], map: "workflow_stages_job_key_key")
+  @@unique([jobId, ordinal], map: "workflow_stages_job_ordinal_key")
+  @@unique([id, jobId], map: "workflow_stages_id_job_key")
+  @@index([status, readyAt, id], map: "workflow_stages_status_ready_idx")
+  @@map("workflow_stages")
+}
+
+model WorkflowStageAttempt {
+  id                    String                @id @db.Uuid
+  stageId               String                @map("stage_id") @db.Uuid
+  attemptNumber         Int                   @map("attempt_number")
+  status                WorkflowAttemptStatus @default(QUEUED)
+  commandIdempotencyKey String                @unique(map: "workflow_attempts_command_idempotency_key") @map("command_idempotency_key") @db.VarChar(191)
+  leaseToken            String?               @map("lease_token") @db.Uuid
+  leasedUntil           DateTime?             @map("leased_until") @db.Timestamptz(6)
+  heartbeatAt           DateTime?             @map("heartbeat_at") @db.Timestamptz(6)
+  recoveryCount         Int                   @default(0) @map("recovery_count")
+  workerId              String?               @map("worker_id") @db.VarChar(191)
+  progressBasisPoints   Int                   @default(0) @map("progress_basis_points")
+  executorVersion       String?               @map("executor_version") @db.VarChar(100)
+  configurationHash     String                @map("configuration_hash") @db.Char(64)
+  errorCode             String?               @map("error_code") @db.VarChar(100)
+  errorDetail           String?               @map("error_detail") @db.VarChar(500)
+  queuedAt              DateTime              @default(now()) @map("queued_at") @db.Timestamptz(6)
+  startedAt             DateTime?             @map("started_at") @db.Timestamptz(6)
+  completedAt           DateTime?             @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  stage                      WorkflowStage               @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  artifacts                  MediaArtifact[]
+  probes                     MediaProbe[]
+  transitions                WorkflowStateTransition[]
+  transcriptionRun           TranscriptionRun?
+  diarizationRun             DiarizationRun?
+  characterIdentificationRun CharacterIdentificationRun?
+
+  @@unique([stageId, attemptNumber], map: "workflow_attempts_stage_attempt_key")
+  @@index([status, leasedUntil, id], map: "workflow_attempts_status_lease_idx")
+  @@map("workflow_stage_attempts")
+}
+
+model WorkflowStageDependency {
+  id               String   @id @db.Uuid
+  jobId            String   @map("job_id") @db.Uuid
+  stageId          String   @map("stage_id") @db.Uuid
+  dependsOnStageId String   @map("depends_on_stage_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  stage     WorkflowStage @relation("WorkflowStageDependencies", fields: [stageId, jobId], references: [id, jobId], onDelete: Cascade)
+  dependsOn WorkflowStage @relation("WorkflowStageDependants", fields: [dependsOnStageId, jobId], references: [id, jobId], onDelete: Cascade)
+
+  @@unique([stageId, dependsOnStageId], map: "workflow_stage_dependencies_stage_dependency_key")
+  @@index([dependsOnStageId, stageId], map: "workflow_stage_dependencies_depends_on_idx")
+  @@index([jobId], map: "workflow_stage_dependencies_job_id_idx")
+  @@map("workflow_stage_dependencies")
+}
+
+model WorkflowJobArtifactInput {
+  id             String   @id @db.Uuid
+  jobId          String   @map("job_id") @db.Uuid
+  artifactId     String   @map("artifact_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  sourceVideoId  String   @map("source_video_id") @db.Uuid
+  role           String   @db.VarChar(80)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  job      WorkflowJob   @relation("WorkflowJobArtifactInputs", fields: [jobId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Cascade)
+  artifact MediaArtifact @relation("WorkflowJobArtifactInputArtifact", fields: [artifactId, organizationId, projectId, sourceVideoId], references: [id, organizationId, projectId, sourceVideoId], onDelete: Restrict)
+
+  @@unique([jobId, role], map: "workflow_job_artifact_inputs_job_role_key")
+  @@index([artifactId], map: "workflow_job_artifact_inputs_artifact_id_idx")
+  @@map("workflow_job_artifact_inputs")
+}
+
+model WorkflowStateTransition {
+  id               String             @id @db.Uuid
+  jobId            String             @map("job_id") @db.Uuid
+  stageId          String?            @map("stage_id") @db.Uuid
+  attemptId        String?            @map("attempt_id") @db.Uuid
+  entityType       WorkflowEntityType @map("entity_type")
+  deduplicationKey String             @unique(map: "workflow_transitions_deduplication_key") @map("deduplication_key") @db.VarChar(191)
+  fromStatus       String?            @map("from_status") @db.VarChar(40)
+  toStatus         String             @map("to_status") @db.VarChar(40)
+  reasonCode       String?            @map("reason_code") @db.VarChar(100)
+  occurredAt       DateTime           @default(now()) @map("occurred_at") @db.Timestamptz(6)
+
+  job     WorkflowJob           @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  stage   WorkflowStage?        @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  attempt WorkflowStageAttempt? @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, occurredAt, id], map: "workflow_transitions_job_occurred_idx")
+  @@index([stageId], map: "workflow_transitions_stage_id_idx")
+  @@index([attemptId], map: "workflow_transitions_attempt_id_idx")
+  @@map("workflow_state_transitions")
+}

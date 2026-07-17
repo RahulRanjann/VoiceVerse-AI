@@ -29,6 +29,7 @@ function projectFixture(id: string, updatedAt = new Date('2026-07-16T10:00:00Z')
     ],
     updatedAt,
     videos: [],
+    workflowJobs: [],
   };
 }
 

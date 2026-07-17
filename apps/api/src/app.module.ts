@@ -5,15 +5,18 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { join } from 'node:path';
 import { LoggerModule } from 'nestjs-pino';
 
-import { validateEnvironment } from './config/environment';
+import { validateApiEnvironment } from './config/environment';
 import { createLoggerOptions } from './config/logger';
 import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './infrastructure/database/database.module';
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { ObservabilityModule } from './observability/observability.module';
 import { IdentityModule } from './modules/identity/identity.module';
+import { LocalizationModule } from './modules/localization/localization.module';
 import { MediaIngestModule } from './modules/media-ingest/media-ingest.module';
 import { ProjectsModule } from './modules/projects/projects.module';
+import { WorkflowModule } from './modules/workflow/workflow.module';
+import { SpeechAnalysisModule } from './modules/speech-analysis/speech-analysis.module';
 import { SystemController } from './system.controller';
 
 @Module({
@@ -22,7 +25,7 @@ import { SystemController } from './system.controller';
       cache: true,
       envFilePath: [join(process.cwd(), '../../.env'), join(process.cwd(), '.env')],
       isGlobal: true,
-      validate: validateEnvironment,
+      validate: validateApiEnvironment,
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],
@@ -40,8 +43,11 @@ import { SystemController } from './system.controller';
     ObservabilityModule,
     HealthModule,
     IdentityModule,
+    LocalizationModule,
     MediaIngestModule,
     ProjectsModule,
+    SpeechAnalysisModule,
+    WorkflowModule,
   ],
   controllers: [SystemController],
   providers: [

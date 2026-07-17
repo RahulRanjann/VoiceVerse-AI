@@ -2,8 +2,10 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -22,6 +24,12 @@ import { DatabaseService } from '../../../infrastructure/database/database.servi
 import { uuidv7 } from '../../../shared/uuid';
 import type { AccessContext } from '../../identity/domain/access-context';
 import {
+  OBJECT_STORAGE_UNAVAILABLE_CODE,
+  OBJECT_STORAGE_UNAVAILABLE_MESSAGE,
+  ObjectStorageUnavailableError,
+  type ObjectStorageOperation,
+} from '../domain/object-storage.error';
+import {
   OBJECT_STORAGE,
   type ObjectStoragePort,
   type StoredObjectMetadata,
@@ -35,8 +43,13 @@ import type {
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const idempotencyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
 
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
+}
+
 @Injectable()
 export class MediaIngestService {
+  private readonly logger = new Logger(MediaIngestService.name);
   private readonly bucket: string;
   private readonly partSize: number;
   private readonly maxUploadBytes: number;
@@ -83,12 +96,17 @@ export class MediaIngestService {
     }
 
     const project = await this.database.client.project.findFirst({
-      select: { id: true, status: true },
+      select: { id: true, status: true, videos: { select: { id: true }, take: 1 } },
       where: { id: projectId, organizationId: context.organizationId },
     });
     if (!project) throw new NotFoundException('Project not found.');
     if (project.status === ProjectStatus.ARCHIVED) {
       throw new ConflictException('Archived projects cannot accept new media.');
+    }
+    if (project.videos.length > 0) {
+      throw new ConflictException(
+        'This project already has a source video. Create a new project for another movie.',
+      );
     }
 
     const videoId = uuidv7();
@@ -98,16 +116,21 @@ export class MediaIngestService {
       throw new BadRequestException('The file exceeds the multipart part-count limit.');
     }
     const storageKey = `tenants/${context.organizationId}/projects/${projectId}/source/${videoId}/original.mp4`;
-    const providerUploadId = await this.storage.createMultipartUpload({
-      bucket: this.bucket,
-      key: storageKey,
-      mediaType: normalized.mediaType,
-      metadata: {
-        'organization-id': context.organizationId,
-        'project-id': projectId,
-        'video-id': videoId,
-      },
-    });
+    let providerUploadId: string;
+    try {
+      providerUploadId = await this.storage.createMultipartUpload({
+        bucket: this.bucket,
+        key: storageKey,
+        mediaType: normalized.mediaType,
+        metadata: {
+          'organization-id': context.organizationId,
+          'project-id': projectId,
+          'video-id': videoId,
+        },
+      });
+    } catch (error) {
+      throw this.objectStorageUnavailable(error, 'create-multipart-upload');
+    }
 
     try {
       const created = await this.database.client.$transaction(async (transaction) => {
@@ -171,6 +194,11 @@ export class MediaIngestService {
       if (winner) {
         this.assertIdempotentCreateMatches(winner.video, projectId, normalized);
         return this.toUploadResponse(winner, winner.video);
+      }
+      if (isUniqueConstraintViolation(error)) {
+        throw new ConflictException(
+          'This project already has a source video. Create a new project for another movie.',
+        );
       }
       throw error;
     }
@@ -240,16 +268,17 @@ export class MediaIngestService {
         bucket: upload.video.storageBucket,
         key: upload.video.storageKey,
       });
-    } catch {
+    } catch (completionError) {
       // CompleteMultipartUpload has an ambiguous-result window. A successful HEAD
       // reconciles a server-side completion whose response was lost.
+      this.logObjectStorageFailure(completionError, 'complete-multipart-upload');
       try {
         stored = await this.storage.headObject({
           bucket: upload.video.storageBucket,
           key: upload.video.storageKey,
         });
-      } catch {
-        throw new ServiceUnavailableException('Object storage could not finalize the upload.');
+      } catch (reconciliationError) {
+        throw this.objectStorageUnavailable(reconciliationError, 'head-object');
       }
     }
 
@@ -571,5 +600,35 @@ export class MediaIngestService {
       // Lifecycle expiration is the final cleanup safety net. This path must not
       // replace the primary database/storage error with an abort error.
     }
+  }
+
+  private objectStorageUnavailable(
+    error: unknown,
+    fallbackOperation: ObjectStorageOperation,
+  ): ServiceUnavailableException {
+    this.logObjectStorageFailure(error, fallbackOperation);
+    return new ServiceUnavailableException({
+      code: OBJECT_STORAGE_UNAVAILABLE_CODE,
+      message: OBJECT_STORAGE_UNAVAILABLE_MESSAGE,
+      statusCode: HttpStatus.SERVICE_UNAVAILABLE,
+    });
+  }
+
+  private logObjectStorageFailure(error: unknown, fallbackOperation: ObjectStorageOperation): void {
+    const storageError =
+      error instanceof ObjectStorageUnavailableError
+        ? error
+        : new ObjectStorageUnavailableError(fallbackOperation, error);
+    const causeName =
+      storageError.cause instanceof Error ? storageError.cause.name : 'UnknownError';
+    this.logger.warn(
+      {
+        dependency: 'object-storage',
+        errorCode: storageError.code,
+        errorName: causeName,
+        operation: storageError.operation,
+      },
+      'Object storage operation unavailable',
+    );
   }
 }

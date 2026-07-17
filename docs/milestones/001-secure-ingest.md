@@ -1,5 +1,8 @@
 # Milestone 1: Tenant identity and secure media ingest
 
+> Authentication endpoints in this historical milestone were superseded by Supabase
+> Auth in Milestone 3 and ADR 0008. The secure-ingest boundary remains current.
+
 Status: **Implementation complete — July 16, 2026**
 
 The automated acceptance suite and live browser/API/PostgreSQL/Redis flow pass. A full

@@ -8,6 +8,7 @@ export default defineConfig({
         'src/features/uploads/checkpoint-store.ts',
         'src/features/uploads/multipart-upload.ts',
         'src/lib/api.ts',
+        'src/lib/build-environment.ts',
       ],
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

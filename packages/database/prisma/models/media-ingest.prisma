@@ -57,17 +57,24 @@ model Video {
   createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  project          Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  createdBy        User                 @relation("VideoCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  multipartUploads MultipartUpload[]
-  scanAttempts     MalwareScanAttempt[]
+  organization          Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  project               Project              @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  createdBy             User                 @relation("VideoCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  multipartUploads      MultipartUpload[]
+  scanAttempts          MalwareScanAttempt[]
+  workflowJobs          WorkflowJob[]
+  mediaArtifacts        MediaArtifact[]
+  artifactLineageInputs ArtifactLineage[]
+  mediaProbes           MediaProbe[]
+  speechAnalyses        SpeechAnalysis[]
 
   @@unique([storageBucket, storageKey], map: "videos_storage_location_key")
+  @@unique([projectId], map: "videos_project_id_key")
+  @@unique([id, projectId, organizationId], map: "videos_id_project_organization_key")
   @@index([organizationId, createdAt(sort: Desc)], map: "videos_org_created_idx")
-  @@index([projectId, createdAt(sort: Desc)], map: "videos_project_created_idx")
   @@index([createdByUserId], map: "videos_created_by_user_id_idx")
   @@index([organizationId, securityStatus, createdAt], map: "videos_org_security_created_idx")
+  @@index([securityStatus, ingestStatus, createdAt, id], map: "videos_workflow_reconcile_idx")
   @@map("videos")
 }
 
@@ -121,6 +128,11 @@ model MalwareScanAttempt {
   signatureVersion String?           @map("signature_version") @db.VarChar(100)
   findingName      String?           @map("finding_name") @db.VarChar(255)
   errorCode        String?           @map("error_code") @db.VarChar(100)
+  leaseToken       String?           @map("lease_token") @db.Uuid
+  leasedUntil      DateTime?         @map("leased_until") @db.Timestamptz(6)
+  heartbeatAt      DateTime?         @map("heartbeat_at") @db.Timestamptz(6)
+  recoveryCount    Int               @default(0) @map("recovery_count")
+  workerId         String?           @map("worker_id") @db.VarChar(191)
   startedAt        DateTime?         @map("started_at") @db.Timestamptz(6)
   completedAt      DateTime?         @map("completed_at") @db.Timestamptz(6)
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -129,5 +141,6 @@ model MalwareScanAttempt {
 
   @@unique([videoId, attemptNumber], map: "malware_scan_attempts_video_attempt_key")
   @@index([status, createdAt], map: "malware_scan_attempts_status_created_idx")
+  @@index([status, leasedUntil, id], map: "malware_scan_attempts_status_lease_idx")
   @@map("malware_scan_attempts")
 }
